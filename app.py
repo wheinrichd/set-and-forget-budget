@@ -74,7 +74,7 @@ def get_days_until_due(day_str):
     except:
         return 99
 
-# --- GOOGLE SHEET LIVE PARSING DATA ENGINE ---
+# --- GOOGLE SHEET LIVE PARSING DATA ENGINE (FIXED FOR SHEET NAME LOOKUPS) ---
 def get_csv_download_url(sheet_url, sheet_name):
     try:
         if '/edit' in sheet_url:
@@ -83,7 +83,8 @@ def get_csv_download_url(sheet_url, sheet_name):
             base_url = sheet_url.split('/pub')[0]
         else:
             base_url = sheet_url.rstrip('/')
-        return f"{base_url}/export?format=csv&sheet={sheet_name}"
+        # FIXED: Using gviz/tq endpoint allows pulling tabs reliably by their text name!
+        return f"{base_url}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
     except:
         return ""
 
@@ -141,28 +142,32 @@ def load_cloud_data():
                     except: pass
     except: pass
 
-    # 3. Fetch Feature 4 Quick Spending Logs (ULTRA ROBUST: Read with NO assumed headers)
+    # 3. Fetch Feature 4 Quick Spending Logs (ROBUST POSITION MATCHING)
     try:
         url_sl = get_csv_download_url(GOOGLE_SHEET_URL, "spending_log")
         if url_sl:
             url_sl += f"&cache_bust={int(time.time())}"
-            df_sl = pd.read_csv(url_sl, header=None)
-            for _, row in df_sl.iterrows():
-                try:
-                    if len(row) >= 2:
-                        cat_str = str(row.iloc[0]).strip()
-                        val_str = str(row.iloc[1]).replace('$', '').replace(',', '').strip()
+            df_sl = pd.read_csv(url_sl)
+            if len(df_sl) > 0:
+                cols = [str(c).strip().lower() for c in df_sl.columns]
+                cat_idx = 0
+                amt_idx = 1
+                for idx, col in enumerate(cols):
+                    if 'cat' in col or 'type' in col: cat_idx = idx
+                    if 'amt' in col or 'val' in col or 'cost' in col or 'amount' in col: amt_idx = idx
+                
+                for _, row in df_sl.iterrows():
+                    try:
+                        cat_str = str(row.iloc[cat_idx]).strip()
+                        val_str = str(row.iloc[amt_idx]).replace('$', '').replace(',', '').strip()
                         
-                        # Save raw look for diagnostic tab
-                        raw_sl_debug.append({"Col A": cat_str, "Col B": val_str})
+                        raw_sl_debug.append({"Category Column": cat_str, "Amount Column": val_str})
                         
-                        # Skip row if it's just text header row
                         if val_str.lower() in ['amount', 'val', 'value', 'cost'] or cat_str.lower() in ['category', 'name']:
                             continue
-                            
                         clean_amt = float(val_str)
                         spending_log.append({"category": cat_str, "amount": clean_amt})
-                except: pass
+                    except: pass
     except: pass
         
     return {"custom_expenses": custom_expenses, "afterpay_ledger": afterpay_ledger, "spending_log": spending_log, "raw_sl_debug": raw_sl_debug}
@@ -272,7 +277,6 @@ tab_segments, tab_spend_track, tab_add_expense, tab_afterpay = st.tabs([
 ])
 
 with tab_segments:
-    # --- FEATURE 2: VISUAL CATEGORY SPENDING PROGRESS BREAKDOWN ---
     st.markdown("### 📊 Live Paycheck Allocation Breakdown")
     categories = {
         "🗓️ Subscriptions & Monthly Debits": sum_fixed_monthly,
@@ -303,7 +307,6 @@ with tab_segments:
             st.markdown(f"<div class='increment-row'><b>{b['name']}</b> ({b['desc']})<br>Full Bill: ${b['val']:,.2f} | <span style='color:#00e676; font-weight:bold;'>Weekly Segment: ${w_val:,.2f}/wk</span></div>", unsafe_allow_html=True)
 
 with tab_spend_track:
-    # --- FEATURE 4: QUICK-DEDUCT CODES ---
     st.markdown("### 💰 Quick-Deduct Spending Buffers")
     st.write("Tap a button while standing at the register to log variable spends against your allowances.")
     
@@ -337,12 +340,11 @@ with tab_spend_track:
             st.success("Logged!"); time.sleep(0.5); st.rerun()
 
     st.markdown("---")
-    # LIVE CLOUD DIAGNOSTIC VIEW
-    with st.expander("📋 Live Cloud Diagnostics (Raw Spending Rows Found)"):
+    with st.expander("📋 Live Cloud Diagnostics (Raw Rows Found in spending_log Tab)"):
         if cloud_data["raw_sl_debug"]:
             st.dataframe(pd.DataFrame(cloud_data["raw_sl_debug"]))
         else:
-            st.warning("No rows found yet. If you have tapped a button, please check that your Google Sheet tab name is spelled exactly lowercase: spending_log")
+            st.warning("No data returned yet. Make sure your tab name is spelled exactly lowercase: spending_log")
 
     if cloud_data["spending_log"]:
         if st.button("🔄 Reset Spending Logs For New Week", key="clear_spend"):
@@ -391,7 +393,6 @@ with tab_afterpay:
         for plan in st.session_state.afterpay_ledger:
             c_left, c_right = st.columns([4, 1])
             with c_left:
-                # --- FEATURE 3: SMART PROGRESS BARS ---
                 pct_paid = ((4 - plan['Remaining']) / 4.0)
                 st.markdown(f"🛍️ **{plan['Merchant']}** | Fortnightly Cost: ${plan['Fortnightly Cost']:,.2f} ({plan['Remaining']} payments left)")
                 st.progress(pct_paid)
