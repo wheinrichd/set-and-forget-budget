@@ -91,6 +91,7 @@ def load_cloud_data():
     custom_expenses = []
     afterpay_ledger = []
     spending_log = []
+    raw_sl_debug = []
     
     # 1. Fetch Custom Expenses
     try:
@@ -140,23 +141,31 @@ def load_cloud_data():
                     except: pass
     except: pass
 
-    # 3. Fetch Feature 4 Quick Spending Logs (FIXED TO SAFELY PARSE STRINGS & NUMBERS)
+    # 3. Fetch Feature 4 Quick Spending Logs (ULTRA ROBUST: Read with NO assumed headers)
     try:
         url_sl = get_csv_download_url(GOOGLE_SHEET_URL, "spending_log")
         if url_sl:
             url_sl += f"&cache_bust={int(time.time())}"
-            df_sl = pd.read_csv(url_sl)
-            df_sl.columns = [str(c).strip().lower() for c in df_sl.columns]
-            if len(df_sl) > 0:
-                for _, row in df_sl.iterrows():
-                    try:
-                        # Strips out $, commas, and whitespace safely
-                        clean_amt = float(str(row.iloc[1]).replace('$', '').replace(',', '').strip())
-                        spending_log.append({"category": str(row.iloc[0]).strip(), "amount": clean_amt})
-                    except: pass
+            df_sl = pd.read_csv(url_sl, header=None)
+            for _, row in df_sl.iterrows():
+                try:
+                    if len(row) >= 2:
+                        cat_str = str(row.iloc[0]).strip()
+                        val_str = str(row.iloc[1]).replace('$', '').replace(',', '').strip()
+                        
+                        # Save raw look for diagnostic tab
+                        raw_sl_debug.append({"Col A": cat_str, "Col B": val_str})
+                        
+                        # Skip row if it's just text header row
+                        if val_str.lower() in ['amount', 'val', 'value', 'cost'] or cat_str.lower() in ['category', 'name']:
+                            continue
+                            
+                        clean_amt = float(val_str)
+                        spending_log.append({"category": cat_str, "amount": clean_amt})
+                except: pass
     except: pass
         
-    return {"custom_expenses": custom_expenses, "afterpay_ledger": afterpay_ledger, "spending_log": spending_log}
+    return {"custom_expenses": custom_expenses, "afterpay_ledger": afterpay_ledger, "spending_log": spending_log, "raw_sl_debug": raw_sl_debug}
 
 cloud_data = load_cloud_data()
 
@@ -326,6 +335,14 @@ with tab_spend_track:
         if st.button("Log $50 Groceries", key="btn_g50"):
             requests.post(APPS_SCRIPT_URL, json={"action": "add", "sheetName": "spending_log", "rowData": ["Groceries", 50, str(datetime.date.today())]})
             st.success("Logged!"); time.sleep(0.5); st.rerun()
+
+    st.markdown("---")
+    # LIVE CLOUD DIAGNOSTIC VIEW
+    with st.expander("📋 Live Cloud Diagnostics (Raw Spending Rows Found)"):
+        if cloud_data["raw_sl_debug"]:
+            st.dataframe(pd.DataFrame(cloud_data["raw_sl_debug"]))
+        else:
+            st.warning("No rows found yet. If you have tapped a button, please check that your Google Sheet tab name is spelled exactly lowercase: spending_log")
 
     if cloud_data["spending_log"]:
         if st.button("🔄 Reset Spending Logs For New Week", key="clear_spend"):
