@@ -63,20 +63,34 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Helper Function: Feature 1 - Intelligent Due Date Calculator
-def get_days_until_due(day_str):
+# Helper Function: Feature 1 - Intelligent Due Date Calculator & Calendar Date String Maker
+def get_due_date_details(day_str):
     try:
         due_day = int(''.join(c for c in day_str if c.isdigit()))
         today = datetime.datetime.now()
-        today_day = today.day
-        if due_day >= today_day:
-            return due_day - today_day
-        else:
+        
+        # Try building the date for the current month
+        try:
+            target_date = today.replace(day=due_day)
+        except ValueError:
+            # Handle months with fewer days (e.g., if day is 30/31 and it's February)
             next_month = today.replace(day=28) + datetime.timedelta(days=4)
             last_day_this_month = (next_month - datetime.timedelta(days=next_month.day)).day
-            return (last_day_this_month - today_day) + due_day
+            target_date = today.replace(day=last_day_this_month)
+            due_day = last_day_this_month
+            
+        if due_day < today.day:
+            # If the day has already passed this month, it's due next month
+            if today.month == 12:
+                target_date = target_date.replace(year=today.year + 1, month=1)
+            else:
+                target_date = target_date.replace(month=today.month + 1)
+                
+        days_until = (target_date.date() - today.date()).days
+        formatted_date = target_date.strftime("%d %b")
+        return days_until, formatted_date
     except:
-        return 99
+        return 99, "Custom"
 
 # --- GOOGLE SHEET LIVE PARSING DATA ENGINE ---
 def get_csv_download_url(sheet_url, sheet_name):
@@ -167,7 +181,7 @@ def load_cloud_data():
                     except: pass
     except: pass
 
-    # 4. Fetch Feature 4 Quick Spending Logs
+    # 4. Fetch Quick Spending Logs
     try:
         url_sl = get_csv_download_url(GOOGLE_SHEET_URL, "spending_log")
         if url_sl:
@@ -257,7 +271,7 @@ total_ap_weekly_impact = sum(plan["Fortnightly Cost"] / 2 for plan in st.session
 
 total_weekly_sum = sum_fixed_monthly + sum_fixed_weekly + sum_utilities + sum_strategic_yearly + total_ap_weekly_impact
 
-# --- INTERACTIVE SIDEBAR & FEATURE 5 INTEL TOGGLE ---
+# --- INTERACTIVE SIDEBAR & WEALTH MODE ---
 st.sidebar.title("🔒 Set & Forget Portal")
 user_income = st.sidebar.number_input("Wednesday Take-Home Pay ($)", min_value=0.0, value=2200.0, step=50.0)
 
@@ -270,10 +284,15 @@ if wealth_mode:
 
 st.title("🛡️ Automated Bills Command Center")
 
-# --- FEATURE 1: DUE THIS WEEK MICRO-ALERTS ---
-upcoming_bills = [b for b in BASE_MONTHLY if 0 <= get_days_until_due(b["day"]) <= 7]
+# --- MICRO-ALERTS FOR MONTHLY BILLS ---
+upcoming_bills = []
+for b in BASE_MONTHLY:
+    days_left, due_date_str = get_due_date_details(b["day"])
+    if 0 <= days_left <= 7:
+        upcoming_bills.append(f"{b['name']} (${b['val']:.0f} on {due_date_str})")
+
 if upcoming_bills:
-    alert_text = "⏰ **Due Within 7 Days:** " + ", ".join([f"{b['name']} (${b['val']:.0f} on the {b['day']})" for b in upcoming_bills])
+    alert_text = "⏰ **Due Within 7 Days:** " + ", ".join(upcoming_bills)
     st.markdown(f"<div class='alert-banner'>{alert_text}</div>", unsafe_allow_html=True)
 
 st.markdown("---")
@@ -302,18 +321,21 @@ tab_segments, tab_spend_track, tab_add_expense, tab_afterpay = st.tabs([
 ])
 
 # Interactive Component: Checkbox Actions Engine
-def render_slice_item(name_str, full_amt, weekly_amt, extra_label=""):
+def render_slice_item(name_str, full_amt, weekly_amt, date_badge=""):
     is_paid = name_str in cloud_data["paid_slices"]
     style_class = "slice-container-paid" if is_paid else "slice-container"
     strike_start = "<s>" if is_paid else ""
     strike_end = "</s>" if is_paid else ""
     color_text = "color: #8b949e;" if is_paid else "color: #00e676; font-weight: bold;"
     
+    # Render badges visually next to the bill name
+    badge_html = f" <span style='color: #f1c40f; font-size: 0.85em; background-color: #282114; padding: 2px 6px; border-radius: 4px; margin-left: 6px;'>📅 {date_badge}</span>" if date_badge else ""
+    
     col_content, col_btn = st.columns([5, 1])
     with col_content:
         st.markdown(f"""
             <div class="{style_class}">
-                {strike_start}<b>{name_str}</b> {extra_label}<br>
+                {strike_start}<b>{name_str}</b>{badge_html}<br>
                 Full Bill: ${full_amt:,.2f} | <span style="{color_text}">Weekly Segment: ${weekly_amt:,.2f}/wk</span>{strike_end}
             </div>
         """, unsafe_allow_html=True)
@@ -354,14 +376,16 @@ with tab_segments:
         st.write("")
         for b in st.session_state.monthly_bills:
             w_val = (b['val'] * 12) / 52
-            render_slice_item(b['name'], b['val'], w_val)
+            _, due_date_str = get_due_date_details(b['day'])
+            render_slice_item(b['name'], b['val'], w_val, date_badge=due_date_str)
             
     with col_right:
         st.markdown("<div class='category-header'><h4>⏳ Weekly & Fortnightly Base Slices</h4></div>", unsafe_allow_html=True)
         st.write("")
         for b in st.session_state.weekly_bills:
             w_val = b['val'] if b['freq'] == 'Weekly' else b['val'] / 2
-            render_slice_item(b['name'], b['val'], w_val, f"({b['desc']})")
+            # Use the descriptive text directly for weekly frequency notes
+            render_slice_item(b['name'], b['val'], w_val, date_badge=b.get('desc', b['freq']))
 
     st.markdown("---")
     col_util, col_yearly = st.columns(2)
@@ -371,7 +395,7 @@ with tab_segments:
         if st.session_state.quarterly_bills:
             for b in st.session_state.quarterly_bills:
                 w_val = b['val'] / 13
-                render_slice_item(b['name'], b['val'], w_val, f"({b.get('desc', 'Quarterly')})")
+                render_slice_item(b['name'], b['val'], w_val, date_badge=b.get('desc', 'Quarterly'))
         else:
             st.caption("No quarterly provisions active.")
             
@@ -381,7 +405,7 @@ with tab_segments:
         if st.session_state.yearly_bills:
             for b in st.session_state.yearly_bills:
                 w_val = (b['val'] / 26) if b['freq'] == "6-Monthly" else (b['val'] / 52)
-                render_slice_item(b['name'], b['val'], w_val, f"({b.get('desc', b['freq'])})")
+                render_slice_item(b['name'], b['val'], w_val, date_badge=b.get('desc', b['freq']))
         else:
             st.caption("No long-term strategic slices active.")
 
