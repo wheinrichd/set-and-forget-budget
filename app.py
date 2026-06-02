@@ -11,7 +11,7 @@ st.set_page_config(
 )
 
 # ⚠️ PASTE YOUR SECURE GOOGLE SHEET LINKS HERE INSIDE THE QUOTES:
-GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1oFJyfxgVGPDx1kRkZlKI2a-aWFd3Dpln9Q6CA5sRZTk/edit?gid=1039253548#gid=1039253548"
+GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1oFJyfxgVGPDx1kRkZlKI2a-aWFd3Dpln9Q6CA5sRZTk/edit?gid=0#gid=0"
 APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzaiAFHjaivojjtF1FEiZcb65n55TFiVQ5rK9hKCET130pbjxUMsscV1OtcZ0hJJsvA/exec"
 
 # Custom Premium Dark Theme CSS Stylesheet
@@ -286,6 +286,7 @@ with tab_add_expense:
             if new_name and new_amt > 0:
                 desc_str = f"{new_freq} (Custom)"
                 payload = {
+                    "action": "add",
                     "sheetName": "custom_expenses",
                     "rowData": [new_name, new_amt, desc_str, new_freq, "Custom"]
                 }
@@ -296,6 +297,24 @@ with tab_add_expense:
                     st.rerun()
                 except Exception as e:
                     st.error(f"Network error linking data: {e}")
+
+    # Display list of active custom expenses with custom row-by-row deletion buttons
+    if cloud_data["custom_expenses"]:
+        st.markdown("<div class='category-header'><h4>☁️ Manage / Delete Active Custom Expenses</h4></div>", unsafe_allow_html=True)
+        for item in cloud_data["custom_expenses"]:
+            c_left, c_right = st.columns([4, 1])
+            with c_left:
+                st.markdown(f"🔹 **{item['name']}** | Full Bill: ${item['val']:,.2f} ({item['freq']})")
+            with c_right:
+                if st.button("❌ Remove", key=f"del_ce_{item['name']}"):
+                    del_payload = {"action": "delete", "sheetName": "custom_expenses", "targetName": item['name']}
+                    try:
+                        requests.post(APPS_SCRIPT_URL, json=del_payload)
+                        st.success(f"Erased {item['name']}!")
+                        time.sleep(1)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Link error: {e}")
 
 with tab_afterpay:
     st.markdown("### Interactive Afterpay Registry")
@@ -308,6 +327,7 @@ with tab_afterpay:
         if st.form_submit_button("Lock Plan to Google Sheets"):
             if ap_merchant and ap_fortnightly > 0:
                 payload = {
+                    "action": "add",
                     "sheetName": "afterpay_ledger",
                     "rowData": [ap_merchant, ap_fortnightly, ap_remaining, ap_fortnightly * ap_remaining]
                 }
@@ -320,12 +340,25 @@ with tab_afterpay:
                     st.error(f"Link error: {e}")
 
     if st.session_state.afterpay_ledger:
-        st.markdown("<div class='category-header'><h4>🛍️ Currently Saved Afterpay Orders</h4></div>", unsafe_allow_html=True)
+        st.markdown("<div class='category-header'><h4>🛍️ Active Afterpay Orders (Tap to Clear)</h4></div>", unsafe_allow_html=True)
         for plan in st.session_state.afterpay_ledger:
-            st.markdown(f"""
-                <div class='ap-active-row'>
-                    <b>{plan['Merchant']}</b> | Total Remaining Debt: <b>${plan['Total Debt']:,.2f}</b><br>
-                    Fortnightly Cost: ${plan['Fortnightly Cost']:,.2f} ({plan['Remaining']} payments left) | 
-                    <span style='color:#ff5252; font-weight:bold;'>Auto-Added To Transfer: ${plan['Fortnightly Cost']/2:,.2f}/wk</span>
-                </div>
-            """, unsafe_allow_html=True)
+            c_left, c_right = st.columns([4, 1])
+            with c_left:
+                st.markdown(f"""
+                    <div class='ap-active-row' style='margin-bottom:0px;'>
+                        <b>{plan['Merchant']}</b> | Total Debt: <b>${plan['Total Debt']:,.2f}</b><br>
+                        Fortnightly Cost: ${plan['Fortnightly Cost']:,.2f} ({plan['Remaining']} left) | 
+                        <span style='color:#ff5252; font-weight:bold;'>Weekly Impact: ${plan['Fortnightly Cost']/2:,.2f}/wk</span>
+                    </div>
+                """, unsafe_allow_html=True)
+            with c_right:
+                st.write("") # Quick padding layout shift to align button vertically
+                if st.button("❌ Clear Plan", key=f"del_ap_{plan['Merchant']}"):
+                    del_payload = {"action": "delete", "sheetName": "afterpay_ledger", "targetName": plan['Merchant']}
+                    try:
+                        requests.post(APPS_SCRIPT_URL, json=del_payload)
+                        st.success(f"Cleared {plan['Merchant']}!")
+                        time.sleep(1)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Link error: {e}")
