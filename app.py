@@ -12,7 +12,7 @@ st.set_page_config(
 )
 
 # ⚠️ PASTE YOUR SECURE GOOGLE SHEET LINKS HERE INSIDE THE QUOTES:
-GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1oFJyfxgVGPDx1kRkZlKI2a-aWFd3Dpln9Q6CA5sRZTk/edit?gid=156609322#gid=156609322"
+GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1oFJyfxgVGPDx1kRkZlKI2a-aWFd3Dpln9Q6CA5sRZTk/edit?gid=1235427596#gid=1235427596"
 APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzaiAFHjaivojjtF1FEiZcb65n55TFiVQ5rK9hKCET130pbjxUMsscV1OtcZ0hJJsvA/exec"
 
 # Premium Dark Command Center CSS Custom Stylesheet
@@ -27,20 +27,24 @@ st.markdown("""
         box-shadow: 0 4px 10px rgba(0,0,0,0.3);
     }
     h1, h2, h3, h4 { color: #f0f6fc !important; font-weight: 700; font-family: -apple-system, sans-serif; }
-    .increment-row {
+    
+    /* Slice Container Styling */
+    .slice-container {
         background-color: #1f242c;
         border-left: 4px solid #00e676;
-        padding: 12px 16px;
-        margin-bottom: 8px;
-        border-radius: 4px;
+        padding: 10px 14px;
+        margin-bottom: 6px;
+        border-radius: 6px;
     }
-    .ap-active-row {
-        background-color: #211c27;
-        border-left: 4px solid #ff5252;
-        padding: 12px 16px;
-        margin-bottom: 8px;
-        border-radius: 4px;
+    .slice-container-paid {
+        background-color: #14191f;
+        border-left: 4px solid #30363d;
+        padding: 10px 14px;
+        margin-bottom: 6px;
+        border-radius: 6px;
+        opacity: 0.40;
     }
+    
     .category-header {
         background-color: #21262d;
         padding: 6px 12px;
@@ -74,7 +78,7 @@ def get_days_until_due(day_str):
     except:
         return 99
 
-# --- GOOGLE SHEET LIVE PARSING DATA ENGINE (FIXED FOR SHEET NAME LOOKUPS) ---
+# --- GOOGLE SHEET LIVE PARSING DATA ENGINE ---
 def get_csv_download_url(sheet_url, sheet_name):
     try:
         if '/edit' in sheet_url:
@@ -83,7 +87,6 @@ def get_csv_download_url(sheet_url, sheet_name):
             base_url = sheet_url.split('/pub')[0]
         else:
             base_url = sheet_url.rstrip('/')
-        # FIXED: Using gviz/tq endpoint allows pulling tabs reliably by their text name!
         return f"{base_url}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
     except:
         return ""
@@ -93,8 +96,30 @@ def load_cloud_data():
     afterpay_ledger = []
     spending_log = []
     raw_sl_debug = []
+    paid_slices = set()
     
-    # 1. Fetch Custom Expenses
+    # Calculate current cycle's Wednesday boundary
+    today = datetime.date.today()
+    days_since_wednesday = (today.weekday() - 2) % 7
+    current_wednesday = today - datetime.timedelta(days=days_since_wednesday)
+    
+    # 1. Fetch Paid Slices Checklist Status (Filtered dynamically for current Wednesday cycle)
+    try:
+        url_ps = get_csv_download_url(GOOGLE_SHEET_URL, "paid_slices")
+        if url_ps:
+            url_ps += f"&cache_bust={int(time.time())}"
+            df_ps = pd.read_csv(url_ps)
+            if len(df_ps) > 0:
+                for _, row in df_ps.iterrows():
+                    try:
+                        slice_name = str(row.iloc[0]).strip()
+                        date_logged = datetime.datetime.strptime(str(row.iloc[1]).strip(), "%Y-%m-%d").date()
+                        if date_logged >= current_wednesday:
+                            paid_slices.add(slice_name)
+                    except: pass
+    except: pass
+
+    # 2. Fetch Custom Expenses
     try:
         url_ce = get_csv_download_url(GOOGLE_SHEET_URL, "custom_expenses")
         if url_ce:
@@ -119,7 +144,7 @@ def load_cloud_data():
                     except: pass
     except: pass
 
-    # 2. Fetch Afterpay Ledger
+    # 3. Fetch Afterpay Ledger
     try:
         url_ap = get_csv_download_url(GOOGLE_SHEET_URL, "afterpay_ledger")
         if url_ap:
@@ -142,7 +167,7 @@ def load_cloud_data():
                     except: pass
     except: pass
 
-    # 3. Fetch Feature 4 Quick Spending Logs (ROBUST POSITION MATCHING)
+    # 4. Fetch Feature 4 Quick Spending Logs
     try:
         url_sl = get_csv_download_url(GOOGLE_SHEET_URL, "spending_log")
         if url_sl:
@@ -170,7 +195,7 @@ def load_cloud_data():
                     except: pass
     except: pass
         
-    return {"custom_expenses": custom_expenses, "afterpay_ledger": afterpay_ledger, "spending_log": spending_log, "raw_sl_debug": raw_sl_debug}
+    return {"custom_expenses": custom_expenses, "afterpay_ledger": afterpay_ledger, "spending_log": spending_log, "raw_sl_debug": raw_sl_debug, "paid_slices": paid_slices}
 
 cloud_data = load_cloud_data()
 
@@ -276,6 +301,33 @@ tab_segments, tab_spend_track, tab_add_expense, tab_afterpay = st.tabs([
     "🛍️ Afterpay Intercept Guard"
 ])
 
+# Interactive Component: Checkbox Actions Engine
+def render_slice_item(name_str, full_amt, weekly_amt, extra_label=""):
+    is_paid = name_str in cloud_data["paid_slices"]
+    style_class = "slice-container-paid" if is_paid else "slice-container"
+    strike_start = "<s>" if is_paid else ""
+    strike_end = "</s>" if is_paid else ""
+    color_text = "color: #8b949e;" if is_paid else "color: #00e676; font-weight: bold;"
+    
+    col_content, col_btn = st.columns([5, 1])
+    with col_content:
+        st.markdown(f"""
+            <div class="{style_class}">
+                {strike_start}<b>{name_str}</b> {extra_label}<br>
+                Full Bill: ${full_amt:,.2f} | <span style="{color_text}">Weekly Segment: ${weekly_amt:,.2f}/wk</span>{strike_end}
+            </div>
+        """, unsafe_allow_html=True)
+    with col_btn:
+        st.write("") # spacing alignment
+        if is_paid:
+            if st.button("↩️", key=f"unpay_{name_str}", help="Mark as unpaid"):
+                requests.post(APPS_SCRIPT_URL, json={"action": "delete", "sheetName": "paid_slices", "targetName": name_str})
+                st.rerun()
+        else:
+            if st.button("✅", key=f"pay_{name_str}", help="Mark as paid for this week"):
+                requests.post(APPS_SCRIPT_URL, json={"action": "add", "sheetName": "paid_slices", "rowData": [name_str, str(datetime.date.today())]})
+                st.rerun()
+
 with tab_segments:
     st.markdown("### 📊 Live Paycheck Allocation Breakdown")
     categories = {
@@ -293,41 +345,46 @@ with tab_segments:
             st.progress(min(pct / 100, 1.0))
             
     st.markdown("---")
-    st.markdown("### Active Weekly Target Slices")
+    st.markdown("### 🗺️ Active Weekly Slices & Paid Checklist")
+    st.caption("Tap ✅ when you transfer or clear a slice for the week. It will automatically reset to unpaid next Wednesday morning.")
     
-    # Row 1: Short & Medium Term
     col_left, col_right = st.columns(2)
     with col_left:
         st.markdown("<div class='category-header'><h4>🗓️ Fixed Monthly Slices (Weekly Value)</h4></div>", unsafe_allow_html=True)
+        st.write("")
         for b in st.session_state.monthly_bills:
             w_val = (b['val'] * 12) / 52
-            st.markdown(f"<div class='increment-row'><b>{b['name']}</b><br>Full Bill: ${b['val']:,.2f} | <span style='color:#00e676; font-weight:bold;'>Weekly Segment: ${w_val:,.2f}/wk</span></div>", unsafe_allow_html=True)
+            render_slice_item(b['name'], b['val'], w_val)
+            
     with col_right:
         st.markdown("<div class='category-header'><h4>⏳ Weekly & Fortnightly Base Slices</h4></div>", unsafe_allow_html=True)
+        st.write("")
         for b in st.session_state.weekly_bills:
             w_val = b['val'] if b['freq'] == 'Weekly' else b['val'] / 2
-            st.markdown(f"<div class='increment-row'><b>{b['name']}</b> ({b['desc']})<br>Full Bill: ${b['val']:,.2f} | <span style='color:#00e676; font-weight:bold;'>Weekly Segment: ${w_val:,.2f}/wk</span></div>", unsafe_allow_html=True)
+            render_slice_item(b['name'], b['val'], w_val, f"({b['desc']})")
 
-    # NEW Row 2: Utilities & Long Term Strategic Slices
     st.markdown("---")
     col_util, col_yearly = st.columns(2)
     with col_util:
         st.markdown("<div class='category-header'><h4>⚡ Quarterly Utility Provisions</h4></div>", unsafe_allow_html=True)
+        st.write("")
         if st.session_state.quarterly_bills:
             for b in st.session_state.quarterly_bills:
-                w_val = b['val'] / 13  # 13 weeks in a quarter
-                st.markdown(f"<div class='increment-row'><b>{b['name']}</b> ({b.get('desc', 'Quarterly')})<br>Full Bill: ${b['val']:,.2f} | <span style='color:#00e676; font-weight:bold;'>Weekly Segment: ${w_val:,.2f}/wk</span></div>", unsafe_allow_html=True)
+                w_val = b['val'] / 13
+                render_slice_item(b['name'], b['val'], w_val, f"({b.get('desc', 'Quarterly')})")
         else:
             st.caption("No quarterly provisions active.")
             
     with col_yearly:
         st.markdown("<div class='category-header'><h4>🦅 Strategic Long-Term Slices (6-Month & Yearly)</h4></div>", unsafe_allow_html=True)
+        st.write("")
         if st.session_state.yearly_bills:
             for b in st.session_state.yearly_bills:
                 w_val = (b['val'] / 26) if b['freq'] == "6-Monthly" else (b['val'] / 52)
-                st.markdown(f"<div class='increment-row'><b>{b['name']}</b> ({b.get('desc', b['freq'])})<br>Full Bill: ${b['val']:,.2f} | <span style='color:#00e676; font-weight:bold;'>Weekly Segment: ${w_val:,.2f}/wk</span></div>", unsafe_allow_html=True)
+                render_slice_item(b['name'], b['val'], w_val, f"({b.get('desc', b['freq'])})")
         else:
             st.caption("No long-term strategic slices active.")
+
 with tab_spend_track:
     st.markdown("### 💰 Quick-Deduct Spending Buffers")
     st.write("Tap a button while standing at the register to log variable spends against your allowances.")
