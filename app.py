@@ -294,6 +294,8 @@ with tab_segments:
             
     st.markdown("---")
     st.markdown("### Active Weekly Target Slices")
+    
+    # Row 1: Short & Medium Term
     col_left, col_right = st.columns(2)
     with col_left:
         st.markdown("<div class='category-header'><h4>🗓️ Fixed Monthly Slices (Weekly Value)</h4></div>", unsafe_allow_html=True)
@@ -306,6 +308,26 @@ with tab_segments:
             w_val = b['val'] if b['freq'] == 'Weekly' else b['val'] / 2
             st.markdown(f"<div class='increment-row'><b>{b['name']}</b> ({b['desc']})<br>Full Bill: ${b['val']:,.2f} | <span style='color:#00e676; font-weight:bold;'>Weekly Segment: ${w_val:,.2f}/wk</span></div>", unsafe_allow_html=True)
 
+    # NEW Row 2: Utilities & Long Term Strategic Slices
+    st.markdown("---")
+    col_util, col_yearly = st.columns(2)
+    with col_util:
+        st.markdown("<div class='category-header'><h4>⚡ Quarterly Utility Provisions</h4></div>", unsafe_allow_html=True)
+        if st.session_state.quarterly_bills:
+            for b in st.session_state.quarterly_bills:
+                w_val = b['val'] / 13  # 13 weeks in a quarter
+                st.markdown(f"<div class='increment-row'><b>{b['name']}</b> ({b.get('desc', 'Quarterly')})<br>Full Bill: ${b['val']:,.2f} | <span style='color:#00e676; font-weight:bold;'>Weekly Segment: ${w_val:,.2f}/wk</span></div>", unsafe_allow_html=True)
+        else:
+            st.caption("No quarterly provisions active.")
+            
+    with col_yearly:
+        st.markdown("<div class='category-header'><h4>🦅 Strategic Long-Term Slices (6-Month & Yearly)</h4></div>", unsafe_allow_html=True)
+        if st.session_state.yearly_bills:
+            for b in st.session_state.yearly_bills:
+                w_val = (b['val'] / 26) if b['freq'] == "6-Monthly" else (b['val'] / 52)
+                st.markdown(f"<div class='increment-row'><b>{b['name']}</b> ({b.get('desc', b['freq'])})<br>Full Bill: ${b['val']:,.2f} | <span style='color:#00e676; font-weight:bold;'>Weekly Segment: ${w_val:,.2f}/wk</span></div>", unsafe_allow_html=True)
+        else:
+            st.caption("No long-term strategic slices active.")
 with tab_spend_track:
     st.markdown("### 💰 Quick-Deduct Spending Buffers")
     st.write("Tap a button while standing at the register to log variable spends against your allowances.")
