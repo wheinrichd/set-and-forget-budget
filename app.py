@@ -12,7 +12,7 @@ st.set_page_config(
 )
 
 # ⚠️ PASTE YOUR SECURE GOOGLE SHEET LINKS HERE INSIDE THE QUOTES:
-GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1oFJyfxgVGPDx1kRkZlKI2a-aWFd3Dpln9Q6CA5sRZTk/edit?gid=0#gid=0"
+GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1oFJyfxgVGPDx1kRkZlKI2a-aWFd3Dpln9Q6CA5sRZTk/edit?gid=156609322#gid=156609322"
 APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzaiAFHjaivojjtF1FEiZcb65n55TFiVQ5rK9hKCET130pbjxUMsscV1OtcZ0hJJsvA/exec"
 
 # Premium Dark Command Center CSS Custom Stylesheet
@@ -242,4 +242,143 @@ leftover_cash = user_income - total_weekly_sum - extra_savings_target
 col1, col2, col3 = st.columns(3)
 with col1:
     st.metric("Wednesday Paycheck", f"${user_income:,.2f}", "Verified Total Income In")
-with col2
+with col2:
+    st.metric("Set & Forget Bill Transfer", f"${total_weekly_sum + extra_savings_target:,.2f}", f"Includes Afterpay + Base Commitments")
+with col3:
+    label = "Guilt-Free Personal Cash" if wealth_mode else "Leftover Spending Cash"
+    st.metric(label, f"${leftover_cash:,.2f}", "Safe Discretionary Balance" if leftover_cash >= 0 else "Income Deficit Warning", delta_color="normal" if leftover_cash >= 0 else "inverse")
+
+if wealth_mode:
+    st.info(f"📈 **Wealth Mode Active:** We have successfully carved out an extra **${extra_savings_target:,.2f}/week** directly into your high-yield goals before showing your personal spending cash.")
+
+st.markdown("---")
+
+tab_segments, tab_spend_track, tab_add_expense, tab_afterpay = st.tabs([
+    "🗂️ Weekly Slices & Breakdown", 
+    "💰 Fuel & Grocery Loggers",
+    "➕ Add New Custom Expense", 
+    "🛍️ Afterpay Intercept Guard"
+])
+
+with tab_segments:
+    # --- FEATURE 2: VISUAL CATEGORY SPENDING PROGRESS BREAKDOWN ---
+    st.markdown("### 📊 Live Paycheck Allocation Breakdown")
+    categories = {
+        "🗓️ Subscriptions & Monthly Debits": sum_fixed_monthly,
+        "⏳ Living, Church & Core Base Slices": sum_fixed_weekly,
+        "⚡ Quarterly Utility Provisions": sum_utilities,
+        "🦅 Strategic Long-Term Rego & Insurances": sum_strategic_yearly,
+        "🛍️ Active Afterpay Intercept Balance": total_ap_weekly_impact,
+        "📈 Strategic Extra Savings Push": extra_savings_target
+    }
+    for cat_name, cat_val in categories.items():
+        if cat_val > 0:
+            pct = (cat_val / user_income) * 100
+            st.write(f"**{cat_name}** — ${cat_val:,.2f}/wk ({pct:.1f}% of check)")
+            st.progress(min(pct / 100, 1.0))
+            
+    st.markdown("---")
+    st.markdown("### Active Weekly Target Slices")
+    col_left, col_right = st.columns(2)
+    with col_left:
+        st.markdown("<div class='category-header'><h4>🗓️ Fixed Monthly Slices (Weekly Value)</h4></div>", unsafe_allow_html=True)
+        for b in st.session_state.monthly_bills:
+            w_val = (b['val'] * 12) / 52
+            st.markdown(f"<div class='increment-row'><b>{b['name']}</b><br>Full Bill: ${b['val']:,.2f} | <span style='color:#00e676; font-weight:bold;'>Weekly Segment: ${w_val:,.2f}/wk</span></div>", unsafe_allow_html=True)
+    with col_right:
+        st.markdown("<div class='category-header'><h4>⏳ Weekly & Fortnightly Base Slices</h4></div>", unsafe_allow_html=True)
+        for b in st.session_state.weekly_bills:
+            w_val = b['val'] if b['freq'] == 'Weekly' else b['val'] / 2
+            st.markdown(f"<div class='increment-row'><b>{b['name']}</b> ({b['desc']})<br>Full Bill: ${b['val']:,.2f} | <span style='color:#00e676; font-weight:bold;'>Weekly Segment: ${w_val:,.2f}/wk</span></div>", unsafe_allow_html=True)
+
+with tab_spend_track:
+    # --- FEATURE 4: QUICK-DEDUCT CODES ---
+    st.markdown("### 💰 Quick-Deduct Spending Buffers")
+    st.write("Tap a button while standing at the register to log variable spends against your allowances.")
+    
+    fuel_spent = sum(item["amount"] for item in cloud_data["spending_log"] if item["category"] == "Fuel")
+    grocery_spent = sum(item["amount"] for item in cloud_data["spending_log"] if item["category"] == "Groceries")
+    
+    f_rem = max(100.0 - fuel_spent, 0.0)
+    g_rem = max(150.0 - grocery_spent, 0.0)
+    
+    c_f, c_g = st.columns(2)
+    with c_f:
+        st.subheader(f"⛽ Fuel Pocket: ${f_rem:,.2f} Left")
+        st.progress(f_rem / 100.0)
+        st.caption(f"Spent: ${fuel_spent:,.2f} of $100.00 cap")
+        if st.button("Log $20 Fuel Pump", key="btn_f20"):
+            requests.post(APPS_SCRIPT_URL, json={"action": "add", "sheetName": "spending_log", "rowData": ["Fuel", 20, str(datetime.date.today())]})
+            st.success("Logged!"); time.sleep(0.5); st.rerun()
+        if st.button("Log $50 Fuel Pump", key="btn_f50"):
+            requests.post(APPS_SCRIPT_URL, json={"action": "add", "sheetName": "spending_log", "rowData": ["Fuel", 50, str(datetime.date.today())]})
+            st.success("Logged!"); time.sleep(0.5); st.rerun()
+            
+    with c_g:
+        st.subheader(f"🛒 Grocery Pocket: ${g_rem:,.2f} Left")
+        st.progress(g_rem / 150.0)
+        st.caption(f"Spent: ${grocery_spent:,.2f} of $150.00 cap")
+        if st.button("Log $20 Groceries", key="btn_g20"):
+            requests.post(APPS_SCRIPT_URL, json={"action": "add", "sheetName": "spending_log", "rowData": ["Groceries", 20, str(datetime.date.today())]})
+            st.success("Logged!"); time.sleep(0.5); st.rerun()
+        if st.button("Log $50 Groceries", key="btn_g50"):
+            requests.post(APPS_SCRIPT_URL, json={"action": "add", "sheetName": "spending_log", "rowData": ["Groceries", 50, str(datetime.date.today())]})
+            st.success("Logged!"); time.sleep(0.5); st.rerun()
+
+    if cloud_data["spending_log"]:
+        if st.button("🔄 Reset Spending Logs For New Week", key="clear_spend"):
+            requests.post(APPS_SCRIPT_URL, json={"action": "delete", "sheetName": "spending_log", "targetName": "Fuel"})
+            requests.post(APPS_SCRIPT_URL, json={"action": "delete", "sheetName": "spending_log", "targetName": "Groceries"})
+            st.success("Logs reset!"); time.sleep(0.5); st.rerun()
+
+with tab_add_expense:
+    st.markdown("### ➕ Google Sheet Custom Expense Injection")
+    with st.form("custom_expense_form", clear_on_submit=True):
+        new_name = st.text_input("Expense Description Name")
+        col_f, col_a = st.columns(2)
+        new_freq = col_f.selectbox("Billing Cycle Frequency", ["Weekly", "Fortnightly", "Monthly", "Quarterly", "6-Monthly", "Yearly"])
+        new_amt = col_a.number_input("Full Bill Amount ($)", min_value=0.0, step=10.0)
+        if st.form_submit_button("Upload to Google Sheets"):
+            if new_name and new_amt > 0:
+                payload = {"action": "add", "sheetName": "custom_expenses", "rowData": [new_name, new_amt, f"{new_freq} (Custom)", new_freq, "Custom"]}
+                requests.post(APPS_SCRIPT_URL, json=payload)
+                st.success("Uploaded!"); time.sleep(0.5); st.rerun()
+
+    if cloud_data["custom_expenses"]:
+        st.markdown("<div class='category-header'><h4>☁️ Manage / Delete Active Custom Expenses</h4></div>", unsafe_allow_html=True)
+        for item in cloud_data["custom_expenses"]:
+            c_left, c_right = st.columns([4, 1])
+            with c_left: st.markdown(f"🔹 **{item['name']}** | Full Bill: ${item['val']:,.2f} ({item['freq']})")
+            with c_right:
+                if st.button("❌ Remove", key=f"del_ce_{item['name']}"):
+                    requests.post(APPS_SCRIPT_URL, json={"action": "delete", "sheetName": "custom_expenses", "targetName": item['name']})
+                    st.success("Erased!"); time.sleep(0.5); st.rerun()
+
+with tab_afterpay:
+    st.markdown("### Interactive Afterpay Registry")
+    with st.form("ap_entry_form", clear_on_submit=True):
+        ap_merchant = st.text_input("Store Name / Item Description")
+        col_x, col_y = st.columns(2)
+        ap_fortnightly = col_x.number_input("Fortnightly Installment Amount ($)", min_value=0.0, step=5.0)
+        ap_remaining = col_y.number_input("Payments Remaining", min_value=1, max_value=4, value=4, step=1)
+        if st.form_submit_button("Lock Plan to Google Sheets"):
+            if ap_merchant and ap_fortnightly > 0:
+                payload = {"action": "add", "sheetName": "afterpay_ledger", "rowData": [ap_merchant, ap_fortnightly, ap_remaining, ap_fortnightly * ap_remaining]}
+                requests.post(APPS_SCRIPT_URL, json=payload)
+                st.success("Committed!"); time.sleep(0.5); st.rerun()
+
+    if st.session_state.afterpay_ledger:
+        st.markdown("<div class='category-header'><h4>🛍️ Active Afterpay Orders</h4></div>", unsafe_allow_html=True)
+        for plan in st.session_state.afterpay_ledger:
+            c_left, c_right = st.columns([4, 1])
+            with c_left:
+                # --- FEATURE 3: SMART PROGRESS BARS ---
+                pct_paid = ((4 - plan['Remaining']) / 4.0)
+                st.markdown(f"🛍️ **{plan['Merchant']}** | Fortnightly Cost: ${plan['Fortnightly Cost']:,.2f} ({plan['Remaining']} payments left)")
+                st.progress(pct_paid)
+                st.caption(f"Total Remaining Debt: ${plan['Total Debt']:,.2f} | {pct_paid*100:.0f}% Paid Off")
+            with c_right:
+                st.write("")
+                if st.button("❌ Clear", key=f"del_ap_{plan['Merchant']}"):
+                    requests.post(APPS_SCRIPT_URL, json={"action": "delete", "sheetName": "afterpay_ledger", "targetName": plan['Merchant']})
+                    st.success("Cleared!"); time.sleep(0.5); st.rerun()
