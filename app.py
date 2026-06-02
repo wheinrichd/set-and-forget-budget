@@ -140,7 +140,7 @@ def load_cloud_data():
                     except: pass
     except: pass
 
-    # 3. Fetch Feature 4 Quick Spending Logs
+    # 3. Fetch Feature 4 Quick Spending Logs (FIXED TO SAFELY PARSE STRINGS & NUMBERS)
     try:
         url_sl = get_csv_download_url(GOOGLE_SHEET_URL, "spending_log")
         if url_sl:
@@ -150,7 +150,9 @@ def load_cloud_data():
             if len(df_sl) > 0:
                 for _, row in df_sl.iterrows():
                     try:
-                        spending_log.append({"category": str(row.iloc[0]).strip(), "amount": float(str(row.iloc[1]).replace('$', ''))})
+                        # Strips out $, commas, and whitespace safely
+                        clean_amt = float(str(row.iloc[1]).replace('$', '').replace(',', '').strip())
+                        spending_log.append({"category": str(row.iloc[0]).strip(), "amount": clean_amt})
                     except: pass
     except: pass
         
