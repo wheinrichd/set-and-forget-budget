@@ -358,7 +358,7 @@ tab_segments, tab_spend_track, tab_add_expense, tab_afterpay = st.tabs([
 ])
 
 # Interactive Component: Checkbox Actions Engine
-def render_slice_item(name_str, full_amt, weekly_amt, date_badge=""):
+def render_slice_item(name_str, full_amt, weekly_amt, item_index, date_badge=""):
     is_paid = name_str in cloud_data["paid_slices"]
     style_class = "slice-container-paid" if is_paid else "slice-container"
     strike_start = "<s>" if is_paid else ""
@@ -378,11 +378,11 @@ def render_slice_item(name_str, full_amt, weekly_amt, date_badge=""):
     with col_btn:
         st.write("") 
         if is_paid:
-            if st.button("↩️", key=f"unpay_{name_str}", help="Mark as unpaid"):
+            if st.button("↩️", key=f"unpay_{name_str}_{item_index}", help="Mark as unpaid"):
                 requests.post(APPS_SCRIPT_URL, json={"action": "delete", "sheetName": "paid_slices", "targetName": name_str})
                 st.rerun()
         else:
-            if st.button("✅", key=f"pay_{name_str}", help="Mark as paid for this week"):
+            if st.button("✅", key=f"pay_{name_str}_{item_index}", help="Mark as paid for this week"):
                 requests.post(APPS_SCRIPT_URL, json={"action": "add", "sheetName": "paid_slices", "rowData": [name_str, str(datetime.date.today())]})
                 st.rerun()
 
@@ -409,17 +409,17 @@ with tab_segments:
     with col_left:
         st.markdown("<div class='category-header'><h4>🗓️ Fixed Monthly Slices (Weekly Value)</h4></div>", unsafe_allow_html=True)
         st.write("")
-        for b in st.session_state.monthly_bills:
+        for idx, b in enumerate(st.session_state.monthly_bills):
             w_val = (b['val'] * 12) / 52
             _, due_date_str = get_due_date_details(b['day'])
-            render_slice_item(b['name'], b['val'], w_val, date_badge=due_date_str)
+            render_slice_item(b['name'], b['val'], w_val, f"mon_{idx}", date_badge=due_date_str)
             
     with col_right:
         st.markdown("<div class='category-header'><h4>⏳ Weekly & Fortnightly Base Slices</h4></div>", unsafe_allow_html=True)
         st.write("")
-        for b in st.session_state.weekly_bills:
+        for idx, b in enumerate(st.session_state.weekly_bills):
             w_val = b['val'] if b['freq'] == 'Weekly' else b['val'] / 2
-            render_slice_item(b['name'], b['val'], w_val, date_badge=b.get('desc', b['freq']))
+            render_slice_item(b['name'], b['val'], w_val, f"wek_{idx}", date_badge=b.get('desc', b['freq']))
 
     st.markdown("---")
     col_util, col_yearly = st.columns(2)
@@ -427,17 +427,17 @@ with tab_segments:
         st.markdown("<div class='category-header'><h4>⚡ Quarterly Utility Provisions</h4></div>", unsafe_allow_html=True)
         st.write("")
         if st.session_state.quarterly_bills:
-            for b in st.session_state.quarterly_bills:
+            for idx, b in enumerate(st.session_state.quarterly_bills):
                 w_val = b['val'] / 13
-                render_slice_item(b['name'], b['val'], w_val, date_badge=b.get('desc', 'Quarterly'))
+                render_slice_item(b['name'], b['val'], w_val, f"utl_{idx}", date_badge=b.get('desc', 'Quarterly'))
             
     with col_yearly:
         st.markdown("<div class='category-header'><h4>🦅 Strategic Long-Term Slices (6-Month & Yearly)</h4></div>", unsafe_allow_html=True)
         st.write("")
         if st.session_state.yearly_bills:
-            for b in st.session_state.yearly_bills:
+            for idx, b in enumerate(st.session_state.yearly_bills):
                 w_val = (b['val'] / 26) if b['freq'] == "6-Monthly" else (b['val'] / 52)
-                render_slice_item(b['name'], b['val'], w_val, date_badge=b.get('desc', b['freq']))
+                render_slice_item(b['name'], b['val'], w_val, f"yrl_{idx}", date_badge=b.get('desc', b['freq']))
 
 with tab_spend_track:
     st.markdown("### 💰 Quick-Deduct Spending Buffers")
@@ -515,11 +515,11 @@ with tab_add_expense:
 
     if cloud_data["custom_expenses"]:
         st.markdown("<div class='category-header'><h4>☁️ Manage / Delete Active Custom Expenses</h4></div>", unsafe_allow_html=True)
-        for item in cloud_data["custom_expenses"]:
+        for idx, item in enumerate(cloud_data["custom_expenses"]):
             c_left, c_right = st.columns([4, 1])
             with c_left: st.markdown(f"🔹 **{item['name']}** | Full Bill: ${item['val']:,.2f} ({item['freq']})")
             with c_right:
-                if st.button("❌ Remove", key=f"del_ce_{item['name']}"):
+                if st.button("❌ Remove", key=f"del_ce_{item['name']}_{idx}"):
                     requests.post(APPS_SCRIPT_URL, json={"action": "delete", "sheetName": "custom_expenses", "targetName": item['name']})
                     st.success("Erased!"); time.sleep(0.5); st.rerun()
 
@@ -543,11 +543,11 @@ with tab_add_expense:
                 
     if cloud_data["deleted_baseline"]:
         st.markdown("#### ↩️ Restore Deleted Baseline Items")
-        for hidden_item in sorted(cloud_data["deleted_baseline"]):
+        for idx, hidden_item in enumerate(sorted(cloud_data["deleted_baseline"])):
             c_l, c_r = st.columns([4, 1])
             with c_l: st.markdown(f"🚫 *{hidden_item} (Currently Hidden)*")
             with c_r:
-                if st.button("🔄 Bring Back", key=f"restore_{hidden_item}"):
+                if st.button("🔄 Bring Back", key=f"restore_{hidden_item}_{idx}"):
                     requests.post(APPS_SCRIPT_URL, json={"action": "delete", "sheetName": "deleted_baseline", "targetName": hidden_item})
                     st.success("Restored!"); time.sleep(0.5); st.rerun()
 
@@ -566,7 +566,7 @@ with tab_afterpay:
 
     if st.session_state.afterpay_ledger:
         st.markdown("<div class='category-header'><h4>🛍️ Active Afterpay Orders</h4></div>", unsafe_allow_html=True)
-        for plan in st.session_state.afterpay_ledger:
+        for idx, plan in enumerate(st.session_state.afterpay_ledger):
             c_left, c_right = st.columns([4, 1])
             with c_left:
                 pct_paid = ((4 - plan['Remaining']) / 4.0)
@@ -575,6 +575,6 @@ with tab_afterpay:
                 st.caption(f"Total Remaining Debt: ${plan['Total Debt']:,.2f} | {pct_paid*100:.0f}% Paid Off")
             with c_right:
                 st.write("")
-                if st.button("❌ Clear", key=f"del_ap_{plan['Merchant']}"):
+                if st.button("❌ Clear", key=f"del_ap_{plan['Merchant']}_{idx}"):
                     requests.post(APPS_SCRIPT_URL, json={"action": "delete", "sheetName": "afterpay_ledger", "targetName": plan['Merchant']})
                     st.success("Cleared!"); time.sleep(0.5); st.rerun()
