@@ -154,7 +154,7 @@ def load_cloud_data():
             val_col = 'val' if 'val' in df_ce.columns else ('value' if 'value' in df_ce.columns else ('amount' if 'amount' in df_ce.columns else None))
             freq_col = 'freq' if 'freq' in df_ce.columns else ('frequency' if 'frequency' in df_ce.columns else None)
             desc_col = 'desc' if 'desc' in df_ce.columns else ('description' if 'description' in df_ce.columns else None)
-            day_col = 'day' if 'day' in df_col.columns else None if 'day' in df_ce.columns else None
+            day_col = 'day' if 'day' in df_ce.columns else None
 
             if name_col and val_col:
                 df_ce = df_ce.dropna(subset=[name_col, val_col])
@@ -223,7 +223,7 @@ cloud_data = load_cloud_data()
 # --- HARDCODED BASELINE BUDGET MATRIX ---
 RAW_MONTHLY = [
     {"name": "GO credit", "val": 250.00, "day": "2nd"}, {"name": "STAN", "val": 22.00, "day": "4th"},
-    {"name": "ExpressVPN", "val": 21.00, "day": "4th"}, {"name": "Prime", "val": 13.00, "day": "4th"}, 
+    {"name": "ExpressVPN", "val": 21.00, "day": "4th"}, {"name": "Prime", "val": 13.00, "day": "4th"},
     {"name": "DSC", "val": 12.00, "day": "7th"}, {"name": "Cba credit", "val": 302.00, "day": "8th"}, 
     {"name": "AIA", "val": 44.00, "day": "8th"}, {"name": "Telstra", "val": 461.00, "day": "8th"}, 
     {"name": "Kindle", "val": 14.00, "day": "9th"}, {"name": "Gamivo", "val": 7.00, "day": "9th"}, 
@@ -496,10 +496,9 @@ with tab_spend_track:
 
     st.markdown("---")
     if cloud_data["spending_log"]:
-        if st.button("🔄 Reset Spending Logs For New Week", key="clear_spend"):
-            requests.post(APPS_SCRIPT_URL, json={"action": "delete", "sheetName": "spending_log", "targetName": "Fuel"})
-            requests.post(APPS_SCRIPT_URL, json={"action": "delete", "sheetName": "spending_log", "targetName": "Groceries"})
-            st.success("Logs reset!"); time.sleep(0.5); st.rerun()
+        if st.button("🔥 Master Erase Spending Log", key="clear_spend", type="primary", use_container_width=True):
+            requests.post(APPS_SCRIPT_URL, json={"action": "clear_all_rows", "sheetName": "spending_log"})
+            st.success("Spending ledger wiped blank!"); time.sleep(0.5); st.rerun()
 
 with tab_add_expense:
     st.markdown("### ➕ Google Sheet Custom Expense Injection")
