@@ -63,24 +63,21 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Helper Function: Feature 1 - Intelligent Due Date Calculator & Calendar Date String Maker
+# Helper Function: Feature 1 - Intelligent Due Date Calculator
 def get_due_date_details(day_str):
     try:
         due_day = int(''.join(c for c in day_str if c.isdigit()))
         today = datetime.datetime.now()
         
-        # Try building the date for the current month
         try:
             target_date = today.replace(day=due_day)
         except ValueError:
-            # Handle months with fewer days (e.g., if day is 30/31 and it's February)
             next_month = today.replace(day=28) + datetime.timedelta(days=4)
             last_day_this_month = (next_month - datetime.timedelta(days=next_month.day)).day
             target_date = today.replace(day=last_day_this_month)
             due_day = last_day_this_month
             
         if due_day < today.day:
-            # If the day has already passed this month, it's due next month
             if today.month == 12:
                 target_date = target_date.replace(year=today.year + 1, month=1)
             else:
@@ -109,15 +106,15 @@ def load_cloud_data():
     custom_expenses = []
     afterpay_ledger = []
     spending_log = []
-    raw_sl_debug = []
     paid_slices = set()
+    deleted_baseline = set()
     
     # Calculate current cycle's Wednesday boundary
     today = datetime.date.today()
     days_since_wednesday = (today.weekday() - 2) % 7
     current_wednesday = today - datetime.timedelta(days=days_since_wednesday)
     
-    # 1. Fetch Paid Slices Checklist Status (Filtered dynamically for current Wednesday cycle)
+    # 1. Fetch Paid Slices Checklist Status
     try:
         url_ps = get_csv_download_url(GOOGLE_SHEET_URL, "paid_slices")
         if url_ps:
@@ -133,7 +130,20 @@ def load_cloud_data():
                     except: pass
     except: pass
 
-    # 2. Fetch Custom Expenses
+    # 2. Fetch Muted Baseline Subscriptions/Credits
+    try:
+        url_db = get_csv_download_url(GOOGLE_SHEET_URL, "deleted_baseline")
+        if url_db:
+            url_db += f"&cache_bust={int(time.time())}"
+            df_db = pd.read_csv(url_db)
+            if len(df_db) > 0:
+                for _, row in df_db.iterrows():
+                    try:
+                        deleted_baseline.add(str(row.iloc[0]).strip())
+                    except: pass
+    except: pass
+
+    # 3. Fetch Custom Expenses
     try:
         url_ce = get_csv_download_url(GOOGLE_SHEET_URL, "custom_expenses")
         if url_ce:
@@ -144,7 +154,7 @@ def load_cloud_data():
             val_col = 'val' if 'val' in df_ce.columns else ('value' if 'value' in df_ce.columns else ('amount' if 'amount' in df_ce.columns else None))
             freq_col = 'freq' if 'freq' in df_ce.columns else ('frequency' if 'frequency' in df_ce.columns else None)
             desc_col = 'desc' if 'desc' in df_ce.columns else ('description' if 'description' in df_ce.columns else None)
-            day_col = 'day' if 'day' in df_ce.columns else None
+            day_col = 'day' if 'day' in df_col.columns else None if 'day' in df_ce.columns else None
 
             if name_col and val_col:
                 df_ce = df_ce.dropna(subset=[name_col, val_col])
@@ -158,7 +168,7 @@ def load_cloud_data():
                     except: pass
     except: pass
 
-    # 3. Fetch Afterpay Ledger
+    # 4. Fetch Afterpay Ledger
     try:
         url_ap = get_csv_download_url(GOOGLE_SHEET_URL, "afterpay_ledger")
         if url_ap:
@@ -181,7 +191,7 @@ def load_cloud_data():
                     except: pass
     except: pass
 
-    # 4. Fetch Quick Spending Logs
+    # 5. Fetch Quick Spending Logs
     try:
         url_sl = get_csv_download_url(GOOGLE_SHEET_URL, "spending_log")
         if url_sl:
@@ -199,9 +209,6 @@ def load_cloud_data():
                     try:
                         cat_str = str(row.iloc[cat_idx]).strip()
                         val_str = str(row.iloc[amt_idx]).replace('$', '').replace(',', '').strip()
-                        
-                        raw_sl_debug.append({"Category Column": cat_str, "Amount Column": val_str})
-                        
                         if val_str.lower() in ['amount', 'val', 'value', 'cost'] or cat_str.lower() in ['category', 'name']:
                             continue
                         clean_amt = float(val_str)
@@ -209,19 +216,19 @@ def load_cloud_data():
                     except: pass
     except: pass
         
-    return {"custom_expenses": custom_expenses, "afterpay_ledger": afterpay_ledger, "spending_log": spending_log, "raw_sl_debug": raw_sl_debug, "paid_slices": paid_slices}
+    return {"custom_expenses": custom_expenses, "afterpay_ledger": afterpay_ledger, "spending_log": spending_log, "paid_slices": paid_slices, "deleted_baseline": deleted_baseline}
 
 cloud_data = load_cloud_data()
 
 # --- HARDCODED BASELINE BUDGET MATRIX ---
-BASE_MONTHLY = [
+RAW_MONTHLY = [
     {"name": "GO credit", "val": 250.00, "day": "2nd"}, {"name": "STAN", "val": 22.00, "day": "4th"},
-    {"name": "ExpressVPN", "val": 21.00, "day": "4th"}, {"name": "DSC", "val": 12.00, "day": "7th"},
-    {"name": "Cba credit", "val": 302.00, "day": "8th"}, {"name": "AIA", "val": 44.00, "day": "8th"},
-    {"name": "Telstra", "val": 461.00, "day": "8th"}, {"name": "Kindle", "val": 14.00, "day": "9th"},
-    {"name": "Gamivo", "val": 7.00, "day": "9th"}, {"name": "Paramount", "val": 9.00, "day": "11th"},
-    {"name": "Netflix", "val": 30.00, "day": "14th"}, {"name": "Appletv", "val": 16.00, "day": "15th"},
-    {"name": "Prime", "val": 13.00, "day": "16th"}, {"name": "Humm90", "val": 10.00, "day": "16th"},
+    {"name": "ExpressVPN", "val": 21.00, "day": "4th"}, {"name": "Prime", "val": 13.00, "day": "4th"}, 
+    {"name": "DSC", "val": 12.00, "day": "7th"}, {"name": "Cba credit", "val": 302.00, "day": "8th"}, 
+    {"name": "AIA", "val": 44.00, "day": "8th"}, {"name": "Telstra", "val": 461.00, "day": "8th"}, 
+    {"name": "Kindle", "val": 14.00, "day": "9th"}, {"name": "Gamivo", "val": 7.00, "day": "9th"}, 
+    {"name": "Paramount", "val": 9.00, "day": "11th"}, {"name": "Netflix", "val": 30.00, "day": "14th"}, 
+    {"name": "Appletv", "val": 16.00, "day": "15th"}, {"name": "Humm90", "val": 10.00, "day": "16th"},
     {"name": "Spotify", "val": 16.00, "day": "17th"}, {"name": "Bupa", "val": 390.00, "day": "19th"},
     {"name": "NRMA Road Ass", "val": 22.00, "day": "20th"}, {"name": "NRMA comp", "val": 250.00, "day": "22nd"},
     {"name": "HomeContents", "val": 76.00, "day": "22nd"}, {"name": "Azora", "val": 15.00, "day": "22nd"},
@@ -230,7 +237,7 @@ BASE_MONTHLY = [
     {"name": "Zip", "val": 100.00, "day": "30th"}
 ]
 
-BASE_WEEKLY = [
+RAW_WEEKLY = [
     {"name": "Emergency Fund", "val": 100.00, "desc": "Weekly (Wed)", "freq": "Weekly"},
     {"name": "Church", "val": 170.00, "desc": "Weekly (Wed)", "freq": "Weekly"},
     {"name": "Fuel Buffer", "val": 100.00, "desc": "Weekly Allocation", "freq": "Weekly"},
@@ -241,14 +248,20 @@ BASE_WEEKLY = [
     {"name": "TAX", "val": 65.00, "desc": "Fortnightly (Wed)", "freq": "Fortnightly"}
 ]
 
-BASE_QUARTERLY = [{"name": "Water", "val": 100.00, "desc": "Quarterly"}, {"name": "Electricity", "val": 550.00, "desc": "Quarterly"}]
-BASE_YEARLY = [
+RAW_QUARTERLY = [{"name": "Water", "val": 100.00, "desc": "Quarterly"}, {"name": "Electricity", "val": 550.00, "desc": "Quarterly"}]
+RAW_YEARLY = [
     {"name": "NRMA CTP", "val": 305.00, "desc": "6-Monthly (Nov)", "freq": "6-Monthly"},
     {"name": "CAR REGO", "val": 335.00, "desc": "6-Monthly (Nov)", "freq": "6-Monthly"},
     {"name": "Costco", "val": 60.00, "desc": "Yearly (30 Apr)", "freq": "Yearly"},
     {"name": "PSPLUS", "val": 215.00, "desc": "Yearly (18 Aug)", "freq": "Yearly"},
     {"name": "Mccafe", "val": 150.00, "desc": "Yearly (16 Oct)", "freq": "Yearly"}
 ]
+
+# Live Filter Engine
+BASE_MONTHLY = [b for b in RAW_MONTHLY if b["name"] not in cloud_data["deleted_baseline"]]
+BASE_WEEKLY = [b for b in RAW_WEEKLY if b["name"] not in cloud_data["deleted_baseline"]]
+BASE_QUARTERLY = [b for b in RAW_QUARTERLY if b["name"] not in cloud_data["deleted_baseline"]]
+BASE_YEARLY = [b for b in RAW_YEARLY if b["name"] not in cloud_data["deleted_baseline"]]
 
 st.session_state.monthly_bills = list(BASE_MONTHLY)
 st.session_state.weekly_bills = list(BASE_WEEKLY)
@@ -271,12 +284,36 @@ total_ap_weekly_impact = sum(plan["Fortnightly Cost"] / 2 for plan in st.session
 
 total_weekly_sum = sum_fixed_monthly + sum_fixed_weekly + sum_utilities + sum_strategic_yearly + total_ap_weekly_impact
 
+# --- PERMANENT WEEKLY INCOME STORAGE ENGINE ---
+today_dt = datetime.date.today()
+days_since_wed = (today_dt.weekday() - 2) % 7
+current_wed_str = str(today_dt - datetime.timedelta(days=days_since_wed))
+
+if "stored_cycle_date" not in st.session_state:
+    st.session_state.stored_cycle_date = current_wed_str
+if "locked_income" not in st.session_state:
+    st.session_state.locked_income = 0.0
+
+if st.session_state.stored_cycle_date != current_wed_str:
+    st.session_state.stored_cycle_date = current_wed_str
+    st.session_state.locked_income = 0.0
+
 # --- INTERACTIVE SIDEBAR & WEALTH MODE ---
 st.sidebar.title("🔒 Set & Forget Portal")
-user_income = st.sidebar.number_input("Wednesday Take-Home Pay ($)", min_value=0.0, value=2200.0, step=50.0)
+
+user_income = st.sidebar.number_input(
+    "Wednesday Take-Home Pay ($)", 
+    min_value=0.0, 
+    value=float(st.session_state.locked_income), 
+    step=50.0,
+    key="income_input_field"
+)
+
+st.session_state.locked_income = user_income
+st.sidebar.markdown(f"**Cycle Locked:** W/C {st.session_state.stored_cycle_date}")
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("🚀 Feature 5: Wealth Mode")
+st.sidebar.subheader("🚀 Wealth Mode")
 wealth_mode = st.sidebar.toggle("Activate 'Safe-To-Save' Targets")
 extra_savings_target = 0.0
 if wealth_mode:
@@ -301,7 +338,7 @@ leftover_cash = user_income - total_weekly_sum - extra_savings_target
 
 col1, col2, col3 = st.columns(3)
 with col1:
-    st.metric("Wednesday Paycheck", f"${user_income:,.2f}", "Verified Total Income In")
+    st.metric("Wednesday Paycheck", f"${user_income:,.2f}", "Locked for current cycle" if user_income > 0 else "Awaiting check input")
 with col2:
     st.metric("Set & Forget Bill Transfer", f"${total_weekly_sum + extra_savings_target:,.2f}", f"Includes Afterpay + Base Commitments")
 with col3:
@@ -328,7 +365,6 @@ def render_slice_item(name_str, full_amt, weekly_amt, date_badge=""):
     strike_end = "</s>" if is_paid else ""
     color_text = "color: #8b949e;" if is_paid else "color: #00e676; font-weight: bold;"
     
-    # Render badges visually next to the bill name
     badge_html = f" <span style='color: #f1c40f; font-size: 0.85em; background-color: #282114; padding: 2px 6px; border-radius: 4px; margin-left: 6px;'>📅 {date_badge}</span>" if date_badge else ""
     
     col_content, col_btn = st.columns([5, 1])
@@ -340,7 +376,7 @@ def render_slice_item(name_str, full_amt, weekly_amt, date_badge=""):
             </div>
         """, unsafe_allow_html=True)
     with col_btn:
-        st.write("") # spacing alignment
+        st.write("") 
         if is_paid:
             if st.button("↩️", key=f"unpay_{name_str}", help="Mark as unpaid"):
                 requests.post(APPS_SCRIPT_URL, json={"action": "delete", "sheetName": "paid_slices", "targetName": name_str})
@@ -362,13 +398,12 @@ with tab_segments:
     }
     for cat_name, cat_val in categories.items():
         if cat_val > 0:
-            pct = (cat_val / user_income) * 100
+            pct = (cat_val / user_income) * 100 if user_income > 0 else 0
             st.write(f"**{cat_name}** — ${cat_val:,.2f}/wk ({pct:.1f}% of check)")
             st.progress(min(pct / 100, 1.0))
             
     st.markdown("---")
     st.markdown("### 🗺️ Active Weekly Slices & Paid Checklist")
-    st.caption("Tap ✅ when you transfer or clear a slice for the week. It will automatically reset to unpaid next Wednesday morning.")
     
     col_left, col_right = st.columns(2)
     with col_left:
@@ -384,7 +419,6 @@ with tab_segments:
         st.write("")
         for b in st.session_state.weekly_bills:
             w_val = b['val'] if b['freq'] == 'Weekly' else b['val'] / 2
-            # Use the descriptive text directly for weekly frequency notes
             render_slice_item(b['name'], b['val'], w_val, date_badge=b.get('desc', b['freq']))
 
     st.markdown("---")
@@ -396,8 +430,6 @@ with tab_segments:
             for b in st.session_state.quarterly_bills:
                 w_val = b['val'] / 13
                 render_slice_item(b['name'], b['val'], w_val, date_badge=b.get('desc', 'Quarterly'))
-        else:
-            st.caption("No quarterly provisions active.")
             
     with col_yearly:
         st.markdown("<div class='category-header'><h4>🦅 Strategic Long-Term Slices (6-Month & Yearly)</h4></div>", unsafe_allow_html=True)
@@ -406,13 +438,9 @@ with tab_segments:
             for b in st.session_state.yearly_bills:
                 w_val = (b['val'] / 26) if b['freq'] == "6-Monthly" else (b['val'] / 52)
                 render_slice_item(b['name'], b['val'], w_val, date_badge=b.get('desc', b['freq']))
-        else:
-            st.caption("No long-term strategic slices active.")
 
 with tab_spend_track:
     st.markdown("### 💰 Quick-Deduct Spending Buffers")
-    st.write("Tap a button while standing at the register to log variable spends against your allowances.")
-    
     fuel_spent = sum(item["amount"] for item in cloud_data["spending_log"] if item["category"] == "Fuel")
     grocery_spent = sum(item["amount"] for item in cloud_data["spending_log"] if item["category"] == "Groceries")
     
@@ -423,32 +451,50 @@ with tab_spend_track:
     with c_f:
         st.subheader(f"⛽ Fuel Pocket: ${f_rem:,.2f} Left")
         st.progress(f_rem / 100.0)
-        st.caption(f"Spent: ${fuel_spent:,.2f} of $100.00 cap")
-        if st.button("Log $20 Fuel Pump", key="btn_f20"):
-            requests.post(APPS_SCRIPT_URL, json={"action": "add", "sheetName": "spending_log", "rowData": ["Fuel", 20, str(datetime.date.today())]})
-            st.success("Logged!"); time.sleep(0.5); st.rerun()
-        if st.button("Log $50 Fuel Pump", key="btn_f50"):
-            requests.post(APPS_SCRIPT_URL, json={"action": "add", "sheetName": "spending_log", "rowData": ["Fuel", 50, str(datetime.date.today())]})
-            st.success("Logged!"); time.sleep(0.5); st.rerun()
+        
+        # Quick Buttons
+        c_f1, c_f2 = st.columns(2)
+        with c_f1:
+            if st.button("Log $20 Fuel Pump", key="btn_f20", use_container_width=True):
+                requests.post(APPS_SCRIPT_URL, json={"action": "add", "sheetName": "spending_log", "rowData": ["Fuel", 20, str(datetime.date.today())]})
+                st.success("Logged!"); time.sleep(0.5); st.rerun()
+        with c_f2:
+            if st.button("Log $50 Fuel Pump", key="btn_f50", use_container_width=True):
+                requests.post(APPS_SCRIPT_URL, json={"action": "add", "sheetName": "spending_log", "rowData": ["Fuel", 50, str(datetime.date.today())]})
+                st.success("Logged!"); time.sleep(0.5); st.rerun()
+        
+        # Custom Logger Form
+        with st.form("custom_fuel_form", clear_on_submit=True):
+            custom_f_amt = st.number_input("Custom Fuel Amount ($)", min_value=0.0, step=5.0, key="custom_fuel_in")
+            if st.form_submit_button("Log Custom Fuel", use_container_width=True):
+                if custom_f_amt > 0:
+                    requests.post(APPS_SCRIPT_URL, json={"action": "add", "sheetName": "spending_log", "rowData": ["Fuel", custom_f_amt, str(datetime.date.today())]})
+                    st.success(f"Logged ${custom_f_amt:.2f}!"); time.sleep(0.5); st.rerun()
             
     with c_g:
         st.subheader(f"🛒 Grocery Pocket: ${g_rem:,.2f} Left")
         st.progress(g_rem / 150.0)
-        st.caption(f"Spent: ${grocery_spent:,.2f} of $150.00 cap")
-        if st.button("Log $20 Groceries", key="btn_g20"):
-            requests.post(APPS_SCRIPT_URL, json={"action": "add", "sheetName": "spending_log", "rowData": ["Groceries", 20, str(datetime.date.today())]})
-            st.success("Logged!"); time.sleep(0.5); st.rerun()
-        if st.button("Log $50 Groceries", key="btn_g50"):
-            requests.post(APPS_SCRIPT_URL, json={"action": "add", "sheetName": "spending_log", "rowData": ["Groceries", 50, str(datetime.date.today())]})
-            st.success("Logged!"); time.sleep(0.5); st.rerun()
+        
+        # Quick Buttons
+        c_g1, c_g2 = st.columns(2)
+        with c_g1:
+            if st.button("Log $20 Groceries", key="btn_g20", use_container_width=True):
+                requests.post(APPS_SCRIPT_URL, json={"action": "add", "sheetName": "spending_log", "rowData": ["Groceries", 20, str(datetime.date.today())]})
+                st.success("Logged!"); time.sleep(0.5); st.rerun()
+        with c_g2:
+            if st.button("Log $50 Groceries", key="btn_g50", use_container_width=True):
+                requests.post(APPS_SCRIPT_URL, json={"action": "add", "sheetName": "spending_log", "rowData": ["Groceries", 50, str(datetime.date.today())]})
+                st.success("Logged!"); time.sleep(0.5); st.rerun()
+                
+        # Custom Logger Form
+        with st.form("custom_grocery_form", clear_on_submit=True):
+            custom_g_amt = st.number_input("Custom Grocery Amount ($)", min_value=0.0, step=5.0, key="custom_grocery_in")
+            if st.form_submit_button("Log Custom Groceries", use_container_width=True):
+                if custom_g_amt > 0:
+                    requests.post(APPS_SCRIPT_URL, json={"action": "add", "sheetName": "spending_log", "rowData": ["Groceries", custom_g_amt, str(datetime.date.today())]})
+                    st.success(f"Logged ${custom_g_amt:.2f}!"); time.sleep(0.5); st.rerun()
 
     st.markdown("---")
-    with st.expander("📋 Live Cloud Diagnostics (Raw Rows Found in spending_log Tab)"):
-        if cloud_data["raw_sl_debug"]:
-            st.dataframe(pd.DataFrame(cloud_data["raw_sl_debug"]))
-        else:
-            st.warning("No data returned yet. Make sure your tab name is spelled exactly lowercase: spending_log")
-
     if cloud_data["spending_log"]:
         if st.button("🔄 Reset Spending Logs For New Week", key="clear_spend"):
             requests.post(APPS_SCRIPT_URL, json={"action": "delete", "sheetName": "spending_log", "targetName": "Fuel"})
@@ -477,6 +523,34 @@ with tab_add_expense:
                 if st.button("❌ Remove", key=f"del_ce_{item['name']}"):
                     requests.post(APPS_SCRIPT_URL, json={"action": "delete", "sheetName": "custom_expenses", "targetName": item['name']})
                     st.success("Erased!"); time.sleep(0.5); st.rerun()
+
+    st.markdown("---")
+    st.markdown("### 🛡️ Remove Core Baseline Subscriptions or Paid Cards")
+    
+    active_baselines = [b["name"] for b in RAW_MONTHLY if b["name"] not in cloud_data["deleted_baseline"]] + \
+                       [b["name"] for b in RAW_WEEKLY if b["name"] not in cloud_data["deleted_baseline"]] + \
+                       [b["name"] for b in RAW_QUARTERLY if b["name"] not in cloud_data["deleted_baseline"]] + \
+                       [b["name"] for b in RAW_YEARLY if b["name"] not in cloud_data["deleted_baseline"]]
+    
+    col_sel, col_btn = st.columns([4, 1])
+    with col_sel:
+        target_baseline = st.selectbox("Select Baseline Bill to Permanent Delete:", ["-- Choose a Bill --"] + sorted(active_baselines))
+    with col_btn:
+        st.write("")
+        if st.button("⛔ Mute Bill", key="mute_baseline_btn"):
+            if target_baseline != "-- Choose a Bill --":
+                requests.post(APPS_SCRIPT_URL, json={"action": "add", "sheetName": "deleted_baseline", "rowData": [target_baseline]})
+                st.success(f"{target_baseline} removed!"); time.sleep(0.5); st.rerun()
+                
+    if cloud_data["deleted_baseline"]:
+        st.markdown("#### ↩️ Restore Deleted Baseline Items")
+        for hidden_item in sorted(cloud_data["deleted_baseline"]):
+            c_l, c_r = st.columns([4, 1])
+            with c_l: st.markdown(f"🚫 *{hidden_item} (Currently Hidden)*")
+            with c_r:
+                if st.button("🔄 Bring Back", key=f"restore_{hidden_item}"):
+                    requests.post(APPS_SCRIPT_URL, json={"action": "delete", "sheetName": "deleted_baseline", "targetName": hidden_item})
+                    st.success("Restored!"); time.sleep(0.5); st.rerun()
 
 with tab_afterpay:
     st.markdown("### Interactive Afterpay Registry")
