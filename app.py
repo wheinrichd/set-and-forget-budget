@@ -6,7 +6,7 @@ import datetime
 
 # --- APP LAYOUT CONFIGURATION ---
 st.set_page_config(
-    page_title="Cloud Connected Paycheck Console",
+    page_title="Dynamic Paycheck Horizon Console",
     page_icon="🔒",
     layout="wide"
 )
@@ -35,7 +35,7 @@ st.markdown("""
         border-top: 4px solid #58a6ff;
         padding: 16px;
         border-radius: 8px;
-        margin-bottom: 15px;
+        margin-bottom: 5px;
     }
     
     .bill-alert-row {
@@ -79,7 +79,6 @@ def get_due_date_details(day_str, target_month_offset=0):
         due_day = int(''.join(c for c in day_str if c.isdigit()))
         today = datetime.datetime.now()
         
-        # Shift months forward if looking into future windows
         target_month = today.month + target_month_offset
         target_year = today.year
         while target_month > 12:
@@ -89,7 +88,6 @@ def get_due_date_details(day_str, target_month_offset=0):
         try:
             target_date = datetime.datetime(target_year, target_month, due_day)
         except ValueError:
-            # Handle month-end wrapping safely
             next_m = datetime.datetime(target_year, target_month, 28) + datetime.timedelta(days=4)
             last_day = (next_m - datetime.timedelta(days=next_m.day)).day
             target_date = datetime.datetime(target_year, target_month, last_day)
@@ -113,13 +111,13 @@ def load_cloud_data():
     spending_log = []
     paid_slices = set()
     deleted_baseline = set()
-    persistent_income = 0.0
+    persistent_income = 1000.0  # Safe default if sheet fails
     
     today = datetime.date.today()
     days_since_wednesday = (today.weekday() - 2) % 7
     current_wednesday = today - datetime.timedelta(days=days_since_wednesday)
     
-    # 0. Fetch Persistent Paycheck Settings
+    # Fetch Base Income Memory
     try:
         url_inc = get_csv_download_url(GOOGLE_SHEET_URL, "income_memory")
         if url_inc:
@@ -129,7 +127,7 @@ def load_cloud_data():
                 persistent_income = float(str(df_inc.iloc[0, 0]).replace('$', '').replace(',', '').strip())
     except: pass
 
-    # 1. Fetch Paid Slices Checklist Status
+    # Fetch Paid Slices Checklist
     try:
         url_ps = get_csv_download_url(GOOGLE_SHEET_URL, "paid_slices")
         if url_ps:
@@ -145,7 +143,7 @@ def load_cloud_data():
                     except: pass
     except: pass
 
-    # 2. Fetch Muted Baseline Subscriptions
+    # Fetch Muted Baseline Subscriptions
     try:
         url_db = get_csv_download_url(GOOGLE_SHEET_URL, "deleted_baseline")
         if url_db:
@@ -157,7 +155,7 @@ def load_cloud_data():
                     except: pass
     except: pass
 
-    # 3. Fetch Custom Expenses
+    # Fetch Custom Expenses
     try:
         url_ce = get_csv_download_url(GOOGLE_SHEET_URL, "custom_expenses")
         if url_ce:
@@ -167,7 +165,6 @@ def load_cloud_data():
             name_col = 'name' if 'name' in df_ce.columns else (df_ce.columns[0] if len(df_ce.columns) > 0 else None)
             val_col = 'val' if 'val' in df_ce.columns else ('value' if 'value' in df_ce.columns else ('amount' if 'amount' in df_ce.columns else None))
             freq_col = 'freq' if 'freq' in df_ce.columns else ('frequency' if 'frequency' in df_ce.columns else None)
-            desc_col = 'desc' if 'desc' in df_ce.columns else ('description' if 'description' in df_ce.columns else None)
             day_col = 'day' if 'day' in df_ce.columns else None
 
             if name_col and val_col:
@@ -176,13 +173,12 @@ def load_cloud_data():
                     try:
                         val_float = float(str(row[val_col]).replace('$', '').replace(',', '').strip())
                         freq_val = str(row[freq_col]).strip() if freq_col and pd.notna(row[freq_col]) else "Monthly"
-                        desc_val = str(row[desc_col]).strip() if desc_col and pd.notna(row[desc_col]) else f"{freq_val} (Custom)"
                         day_val = str(row[day_col]).strip() if day_col and pd.notna(row[day_col]) else "1st"
-                        custom_expenses.append({"name": str(row[name_col]).strip(), "val": val_float, "desc": desc_val, "freq": freq_val, "day": day_val, "is_custom": True})
+                        custom_expenses.append({"name": str(row[name_col]).strip(), "val": val_float, "freq": freq_val, "day": day_val, "is_custom": True})
                     except: pass
     except: pass
 
-    # 4. Fetch Afterpay Ledger
+    # Fetch Afterpay Ledger
     try:
         url_ap = get_csv_download_url(GOOGLE_SHEET_URL, "afterpay_ledger")
         if url_ap:
@@ -192,7 +188,6 @@ def load_cloud_data():
             merchant_col = 'merchant' if 'merchant' in df_ap.columns else (df_ap.columns[0] if len(df_ap.columns) > 0 else None)
             cost_col = 'fortnightly cost' if 'fortnightly cost' in df_ap.columns else ('cost' if 'cost' in df_ap.columns else ('amount' if 'amount' in df_ap.columns else None))
             rem_col = 'remaining' if 'remaining' in df_ap.columns else None
-            debt_col = 'total debt' if 'total debt' in df_ap.columns else ('debt' if 'debt' in df_ap.columns else None)
             
             if merchant_col and cost_col:
                 df_ap = df_ap.dropna(subset=[merchant_col, cost_col])
@@ -200,31 +195,19 @@ def load_cloud_data():
                     try:
                         cost_float = float(str(row[cost_col]).replace('$', '').replace(',', '').strip())
                         rem_int = int(float(str(row[rem_col]).strip())) if rem_col and pd.notna(row[rem_col]) else 4
-                        debt_float = float(str(row[debt_col]).replace('$', '').replace(',', '').strip()) if debt_col and pd.notna(row[debt_col]) else cost_float * rem_int
-                        afterpay_ledger.append({"Merchant": str(row[merchant_col]).strip(), "Fortnightly Cost": cost_float, "Remaining": rem_int, "Total Debt": debt_float})
+                        afterpay_ledger.append({"Merchant": str(row[merchant_col]).strip(), "Fortnightly Cost": cost_float, "Remaining": rem_int})
                     except: pass
     except: pass
 
-    # 5. Fetch Quick Spending Logs
+    # Fetch Quick Spending Logs
     try:
         url_sl = get_csv_download_url(GOOGLE_SHEET_URL, "spending_log")
         if url_sl:
             url_sl += f"&cache_bust={int(time.time())}"
             df_sl = pd.read_csv(url_sl)
             if len(df_sl) > 0:
-                cols = [str(c).strip().lower() for c in df_sl.columns]
-                cat_idx = 0
-                amt_idx = 1
-                for idx, col in enumerate(cols):
-                    if 'cat' in col or 'type' in col: cat_idx = idx
-                    if 'amt' in col or 'val' in col or 'cost' in col or 'amount' in col: amt_idx = idx
-                
                 for _, row in df_sl.iterrows():
-                    try:
-                        cat_str = str(row.iloc[cat_idx]).strip()
-                        val_str = str(row.iloc[amt_idx]).replace('$', '').replace(',', '').strip()
-                        if val_str.lower() in ['amount', 'val', 'value', 'cost'] or cat_str.lower() in ['category', 'name']: continue
-                        spending_log.append({"category": cat_str, "amount": float(val_str)})
+                    try: spending_log.append({"category": str(row.iloc[0]).strip(), "amount": float(str(row.iloc[1]).replace('$', ''))})
                     except: pass
     except: pass
         
@@ -250,69 +233,30 @@ RAW_MONTHLY = [
 ]
 
 RAW_WEEKLY = [
-    {"name": "Emergency Fund", "val": 100.00, "desc": "Weekly (Wed)", "freq": "Weekly"},
-    {"name": "Church", "val": 170.00, "desc": "Weekly (Wed)", "freq": "Weekly"},
-    {"name": "Fuel Buffer", "val": 100.00, "desc": "Weekly Allocation", "freq": "Weekly"},
-    {"name": "Grocery Buffer", "val": 150.00, "desc": "Weekly Allocation", "freq": "Weekly"},
-    {"name": "Rent (Cambridge)", "val": 480.00, "desc": "Weekly (Fri)", "freq": "Weekly"},
-    {"name": "Gym", "val": 91.00, "desc": "Fortnightly (Wed)", "freq": "Fortnightly"},
-    {"name": "Isuzu mux", "val": 714.00, "desc": "Fortnightly (Wed)", "freq": "Fortnightly"},
-    {"name": "TAX", "val": 65.00, "desc": "Fortnightly (Wed)", "freq": "Fortnightly"}
-]
-
-RAW_QUARTERLY = [{"name": "Water", "val": 100.00, "desc": "Quarterly"}, {"name": "Electricity", "val": 550.00, "desc": "Quarterly"}]
-RAW_YEARLY = [
-    {"name": "NRMA CTP", "val": 305.00, "desc": "6-Monthly (Nov)", "freq": "6-Monthly"},
-    {"name": "CAR REGO", "val": 335.00, "desc": "6-Monthly (Nov)", "freq": "6-Monthly"},
-    {"name": "Costco", "val": 60.00, "desc": "Yearly (30 Apr)", "freq": "Yearly"},
-    {"name": "PSPLUS", "val": 215.00, "desc": "Yearly (18 Aug)", "freq": "Yearly"},
-    {"name": "Mccafe", "val": 150.00, "desc": "Yearly (16 Oct)", "freq": "Yearly"}
+    {"name": "Emergency Fund", "val": 100.00, "freq": "Weekly"}, {"name": "Church", "val": 170.00, "freq": "Weekly"},
+    {"name": "Fuel Buffer", "val": 100.00, "freq": "Weekly"}, {"name": "Grocery Buffer", "val": 150.00, "freq": "Weekly"},
+    {"name": "Rent (Cambridge)", "val": 480.00, "freq": "Weekly"}, {"name": "Gym", "val": 91.00, "freq": "Fortnightly"},
+    {"name": "Isuzu mux", "val": 714.00, "freq": "Fortnightly"}, {"name": "TAX", "val": 65.00, "freq": "Fortnightly"}
 ]
 
 BASE_MONTHLY = [b for b in RAW_MONTHLY if b["name"] not in cloud_data["deleted_baseline"]]
 BASE_WEEKLY = [b for b in RAW_WEEKLY if b["name"] not in cloud_data["deleted_baseline"]]
-BASE_QUARTERLY = [b for b in RAW_QUARTERLY if b["name"] not in cloud_data["deleted_baseline"]]
-BASE_YEARLY = [b for b in RAW_YEARLY if b["name"] not in cloud_data["deleted_baseline"]]
 
 st.session_state.monthly_bills = list(BASE_MONTHLY)
 st.session_state.weekly_bills = list(BASE_WEEKLY)
-st.session_state.quarterly_bills = list(BASE_QUARTERLY)
-st.session_state.yearly_bills = list(BASE_YEARLY)
 st.session_state.afterpay_ledger = cloud_data["afterpay_ledger"]
 
 for item in cloud_data["custom_expenses"]:
     if item["freq"] in ["Weekly", "Fortnightly"]: st.session_state.weekly_bills.append(item)
     elif item["freq"] == "Monthly": st.session_state.monthly_bills.append(item)
-    elif item["freq"] == "Quarterly": st.session_state.quarterly_bills.append(item)
-    elif item["freq"] in ["6-Monthly", "Yearly"]: st.session_state.yearly_bills.append(item)
 
-# Sinking Fund Structural Calculations
+# Sinking Fund Reference Total
 sum_fixed_monthly = sum((b["val"] * 12) / 52 for b in st.session_state.monthly_bills)
 sum_fixed_weekly = sum(b["val"] if b["freq"] == "Weekly" else b["val"] / 2 for b in st.session_state.weekly_bills)
-sum_utilities = sum(b["val"] / 13 for b in st.session_state.quarterly_bills)
-sum_strategic_yearly = sum((b["val"] / 26) if b["freq"] == "6-Monthly" else (b["val"] / 52) for b in st.session_state.yearly_bills)
-total_ap_weekly_impact = sum(plan["Fortnightly Cost"] / 2 for plan in st.session_state.afterpay_ledger)
-
-total_weekly_sum = sum_fixed_monthly + sum_fixed_weekly + sum_utilities + sum_strategic_yearly + total_ap_weekly_impact
-
-# --- PERMANENT MEMORY INTERACTIVE SIDEBAR ---
-st.sidebar.title("🔒 Set & Forget Portal")
-
-user_income = st.sidebar.number_input(
-    "Wednesday Take-Home Pay ($)", 
-    min_value=0.0, 
-    value=cloud_data["persistent_income"], 
-    step=50.0
-)
-
-# If the user edits their paycheck, instantly commit it to Google Sheets sheet 'income_memory'
-if user_income != cloud_data["persistent_income"]:
-    requests.post(APPS_SCRIPT_URL, json={"action": "clear_all_rows", "sheetName": "income_memory"})
-    requests.post(APPS_SCRIPT_URL, json={"action": "add", "sheetName": "income_memory", "rowData": [user_income]})
-    st.rerun()
+total_weekly_sum = sum_fixed_monthly + sum_fixed_weekly + sum(p["Fortnightly Cost"] / 2 for p in st.session_state.afterpay_ledger)
 
 st.title("🛡️ 4-Week Paycheck Horizon Matrix")
-st.caption("Tracking exact calendar obligations week-by-week from Wednesday to Tuesday.")
+st.caption("Change individual paycheck boxes below dynamically based on your exact hours or scheduled income for that specific week.")
 
 # --- CALENDAR WINDOW MATRIX CALCULATOR ---
 today = datetime.date.today()
@@ -325,32 +269,31 @@ for i in range(4):
     end_t = start_w + datetime.timedelta(days=6)
     windows.append((start_w, end_t))
 
-# Evaluate full bill targets landing inside each window
 window_bills = [[], [], [], []]
 
-# Map Monthly Bills
+# Map Monthly Bills to actual weeks
 for b in st.session_state.monthly_bills:
     for offset in [0, 1]:
         d_date = get_due_date_details(b["day"], target_month_offset=offset)
         for idx, (ws_date, we_date) in enumerate(windows):
             if ws_date <= d_date <= we_date:
-                window_bills[idx].append({"name": b["name"], "val": b["val"], "type": "Full Monthly Bill"})
+                window_bills[idx].append({"name": b["name"], "val": b["val"]})
 
 # Map Weekly/Fortnightly Obligations
 for idx, (ws_date, we_date) in enumerate(windows):
     for b in st.session_state.weekly_bills:
         if b["freq"] == "Weekly":
-            window_bills[idx].append({"name": b["name"], "val": b["val"], "type": "Weekly Outflow"})
-        else: # Fortnightly
+            window_bills[idx].append({"name": b["name"], "val": b["val"]})
+        else: # Fortnightly Staggering logic
             if idx % 2 == 0:
-                window_bills[idx].append({"name": b["name"], "val": b["val"], "type": "Fortnightly Hit"})
+                window_bills[idx].append({"name": b["name"], "val": b["val"]})
 
 # Map Afterpay Ledger
 for plan in st.session_state.afterpay_ledger:
-    window_bills[0].append({"name": f"🛍️ AP: {plan['Merchant']}", "val": plan["Fortnightly Cost"], "type": "Afterpay Installment"})
-    window_bills[2].append({"name": f"🛍️ AP: {plan['Merchant']}", "val": plan["Fortnightly Cost"], "type": "Afterpay Installment"})
+    window_bills[0].append({"name": f"🛍️ AP: {plan['Merchant']}", "val": plan["Fortnightly Cost"]})
+    window_bills[2].append({"name": f"🛍️ AP: {plan['Merchant']}", "val": plan["Fortnightly Cost"]})
 
-# --- DISPLAY THE 4-WEEK PAYCHECK MATRICES ---
+# --- RENDER FLEXIBLE INPUT COLUMNS ---
 cols_matrix = st.columns(4)
 for i in range(4):
     ws_date, we_date = windows[i]
@@ -358,12 +301,26 @@ for i in range(4):
         st.markdown(f"""
         <div class="paycheck-window-card">
             <h4>Week {i+1} Paycheck</h4>
-            <span style="color: #8b949e; font-size: 0.85em;">📅 {ws_date.strftime('%d %b')} - {we_date.strftime('%d %b')}</span>
+            <span style="color: #8b949e; font-size: 0.82em;">📅 {ws_date.strftime('%d %b')} - {we_date.strftime('%d %b')}</span>
         </div>
         """, unsafe_allow_html=True)
         
+        # 🟢 THE FLEXIBILITY FIX: Independent Local State Variable for each unique week block
+        week_pay_key = f"pay_override_wk_{i}"
+        if week_pay_key not in st.session_state:
+            st.session_state[week_pay_key] = float(cloud_data["persistent_income"])
+            
+        this_weeks_pay = st.number_input(
+            "Income This Week ($)",
+            min_value=0.0,
+            value=float(st.session_state[week_pay_key]),
+            step=50.0,
+            key=f"input_widget_wk_{i}"
+        )
+        st.session_state[week_pay_key] = this_weeks_pay
+        
         full_bills_sum = sum(b["val"] for b in window_bills[i])
-        net_leftover = user_income - full_bills_sum
+        net_leftover = this_weeks_pay - full_bills_sum
         
         st.metric(label="Total Owed Full", value=f"${full_bills_sum:,.2f}")
         if net_leftover >= 0:
@@ -382,6 +339,7 @@ for i in range(4):
 
 st.markdown("---")
 
+# --- CONSOLE TABS FOR REFERENCE AND LOGS ---
 tab_segments, tab_spend_track, tab_add_expense, tab_afterpay = st.tabs([
     "🗂️ Weekly Segment Core Reference", 
     "💰 Fuel & Grocery Loggers",
@@ -417,7 +375,7 @@ def render_slice_item(name_str, full_amt, weekly_amt, item_index, date_badge="")
                 st.rerun()
 
 with tab_segments:
-    st.markdown("### 📊 long-Term Target Slices (Your Ideal Target Transfer: **${total_weekly_sum:,.2f}/wk**)")
+    st.markdown(f"### 📊 Long-Term Target Slices (Your Ideal Target Transfer: **${total_weekly_sum:,.2f}/wk**)")
     col_left, col_right = st.columns(2)
     with col_left:
         st.markdown("<div class='category-header'><h4>🗓️ Fixed Monthly Slices (Weekly Values)</h4></div>", unsafe_allow_html=True)
@@ -429,7 +387,7 @@ with tab_segments:
         st.markdown("<div class='category-header'><h4>⏳ Weekly & Fortnightly Base Slices</h4></div>", unsafe_allow_html=True)
         for idx, b in enumerate(st.session_state.weekly_bills):
             w_val = b['val'] if b['freq'] == 'Weekly' else b['val'] / 2
-            render_slice_item(b['name'], b['val'], w_val, f"wek_{idx}", date_badge=b.get('desc', b['freq']))
+            render_slice_item(b['name'], b['val'], w_val, f"wek_{idx}", date_badge=b.get('freq'))
 
 with tab_spend_track:
     st.markdown("### 💰 Quick-Deduct Spending Buffers")
@@ -476,7 +434,7 @@ with tab_add_expense:
     with st.form("custom_expense_form", clear_on_submit=True):
         new_name = st.text_input("Expense Description Name")
         col_f, col_a = st.columns(2)
-        new_freq = col_f.selectbox("Billing Cycle Frequency", ["Weekly", "Fortnightly", "Monthly", "Quarterly", "6-Monthly", "Yearly"])
+        new_freq = col_f.selectbox("Billing Cycle Frequency", ["Weekly", "Fortnightly", "Monthly"])
         new_amt = col_a.number_input("Full Bill Amount ($)", min_value=0.0, step=10.0)
         new_day = st.text_input("Due Day of Month (e.g. '14th')", value="1st")
         if st.form_submit_button("Upload to Google Sheets"):
@@ -506,7 +464,7 @@ with tab_afterpay:
             if ap_merchant and ap_fortnightly > 0:
                 payload = {"action": "add", "sheetName": "afterpay_ledger", "rowData": [ap_merchant, ap_fortnightly, ap_remaining, ap_fortnightly * ap_remaining]}
                 requests.post(APPS_SCRIPT_URL, json=payload)
-                st.rerun()
+                st.success("Committed!"); time.sleep(0.5); st.rerun()
 
     if st.session_state.afterpay_ledger:
         st.markdown("<div class='category-header'><h4>🛍️ Active Afterpay Orders</h4></div>", unsafe_allow_html=True)
@@ -515,7 +473,6 @@ with tab_afterpay:
             with c_left:
                 pct_paid = ((4 - plan['Remaining']) / 4.0)
                 st.markdown(f"🛍️ **{plan['Merchant']}** | Fortnightly Cost: ${plan['Fortnightly Cost']:,.2f} ({plan['Remaining']} payments left)")
-                st.progress(pct_paid)
             with c_right:
                 if st.button("❌ Clear", key=f"del_ap_{plan['Merchant']}_{idx}"):
                     requests.post(APPS_SCRIPT_URL, json={"action": "delete", "sheetName": "afterpay_ledger", "targetName": plan['Merchant']})
