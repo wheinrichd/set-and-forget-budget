@@ -111,20 +111,28 @@ def load_cloud_data():
     spending_log = []
     paid_slices = set()
     deleted_baseline = set()
-    persistent_income = 1000.0  # Safe default if sheet fails
+    
+    # Core Weekly Income Matrix Memory Defaults
+    saved_weekly_pay = {0: 1200.0, 1: 1200.0, 2: 1200.0, 3: 1200.0}
     
     today = datetime.date.today()
     days_since_wednesday = (today.weekday() - 2) % 7
     current_wednesday = today - datetime.timedelta(days=days_since_wednesday)
     
-    # Fetch Base Income Memory
+    # Fetch 4-Week Saved Income Matrix
     try:
-        url_inc = get_csv_download_url(GOOGLE_SHEET_URL, "income_memory")
+        url_inc = get_csv_download_url(GOOGLE_SHEET_URL, "weekly_income_memory")
         if url_inc:
             url_inc += f"&cache_bust={int(time.time())}"
             df_inc = pd.read_csv(url_inc)
-            if len(df_inc) > 0 and pd.notna(df_inc.iloc[0, 0]):
-                persistent_income = float(str(df_inc.iloc[0, 0]).replace('$', '').replace(',', '').strip())
+            if len(df_inc) > 0:
+                for _, row in df_inc.iterrows():
+                    try:
+                        wk_idx = int(row.iloc[0])
+                        wk_val = float(str(row.iloc[1]).replace('$', '').replace(',', '').strip())
+                        if wk_idx in saved_weekly_pay:
+                            saved_weekly_pay[wk_idx] = wk_val
+                    except: pass
     except: pass
 
     # Fetch Paid Slices Checklist
@@ -211,7 +219,7 @@ def load_cloud_data():
                     except: pass
     except: pass
         
-    return {"custom_expenses": custom_expenses, "afterpay_ledger": afterpay_ledger, "spending_log": spending_log, "paid_slices": paid_slices, "deleted_baseline": deleted_baseline, "persistent_income": persistent_income}
+    return {"custom_expenses": custom_expenses, "afterpay_ledger": afterpay_ledger, "spending_log": spending_log, "paid_slices": paid_slices, "deleted_baseline": deleted_baseline, "saved_weekly_pay": saved_weekly_pay}
 
 cloud_data = load_cloud_data()
 
@@ -284,7 +292,7 @@ for idx, (ws_date, we_date) in enumerate(windows):
     for b in st.session_state.weekly_bills:
         if b["freq"] == "Weekly":
             window_bills[idx].append({"name": b["name"], "val": b["val"]})
-        else: # Fortnightly Staggering logic
+        else:
             if idx % 2 == 0:
                 window_bills[idx].append({"name": b["name"], "val": b["val"]})
 
@@ -293,7 +301,7 @@ for plan in st.session_state.afterpay_ledger:
     window_bills[0].append({"name": f"🛍️ AP: {plan['Merchant']}", "val": plan["Fortnightly Cost"]})
     window_bills[2].append({"name": f"🛍️ AP: {plan['Merchant']}", "val": plan["Fortnightly Cost"]})
 
-# --- RENDER FLEXIBLE INPUT COLUMNS ---
+# --- RENDER CLOUD-PERSISTENT INPUT COLUMNS ---
 cols_matrix = st.columns(4)
 for i in range(4):
     ws_date, we_date = windows[i]
@@ -305,19 +313,27 @@ for i in range(4):
         </div>
         """, unsafe_allow_html=True)
         
-        # 🟢 THE FLEXIBILITY FIX: Independent Local State Variable for each unique week block
-        week_pay_key = f"pay_override_wk_{i}"
-        if week_pay_key not in st.session_state:
-            st.session_state[week_pay_key] = float(cloud_data["persistent_income"])
-            
-        this_weeks_pay = st.number_input(
-            "Income This Week ($)",
-            min_value=0.0,
-            value=float(st.session_state[week_pay_key]),
-            step=50.0,
-            key=f"input_widget_wk_{i}"
-        )
-        st.session_state[week_pay_key] = this_weeks_pay
+        # Pull saved cloud data as baseline
+        cloud_val = cloud_data["saved_weekly_pay"][i]
+        
+        c_input, c_btn = st.columns([3, 1])
+        with c_input:
+            this_weeks_pay = st.number_input(
+                "Income ($)",
+                min_value=0.0,
+                value=float(cloud_val),
+                step=50.0,
+                key=f"pay_input_wk_{i}",
+                label_visibility="collapsed"
+            )
+        with c_btn:
+            # 💾 THE PERMANENT LOCKER FIX: Commits this specific week's number directly to the sheet
+            if st.button("💾", key=f"save_wk_btn_{i}", help="Lock income permanently into Google Sheet"):
+                requests.post(APPS_SCRIPT_URL, json={"action": "delete", "sheetName": "weekly_income_memory", "targetName": str(i)})
+                requests.post(APPS_SCRIPT_URL, json={"action": "add", "sheetName": "weekly_income_memory", "rowData": [i, this_weeks_pay]})
+                st.success("Locked!")
+                time.sleep(0.4)
+                st.rerun()
         
         full_bills_sum = sum(b["val"] for b in window_bills[i])
         net_leftover = this_weeks_pay - full_bills_sum
