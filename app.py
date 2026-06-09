@@ -327,33 +327,44 @@ for i in range(4):
 
 window_bills = [[], [], [], []]
 
-# Map Monthly Bills to actual weeks
+# 1. Map Long-Term Sinking Fund Slices to EVERY single week row
+for idx in range(4):
+    for b in st.session_state.long_term_bills:
+        if b["freq"] == "Quarterly":
+            w_val = (b["val"] * 4) / 52
+        elif b["freq"] == "6-Month":
+            w_val = (b["val"] * 2) / 52
+        else:
+            w_val = b["val"] / 52
+        window_bills[idx].append({"name": f"🏺 SF: {b['name']}", "val": w_val, "is_temp": False, "is_shortfall": False, "is_sf": True})
+
+# 2. Map Monthly Bills to actual target dates
 for b in st.session_state.monthly_bills:
     for offset in [0, 1]:
         d_date = get_due_date_details(b["day"], target_month_offset=offset)
         for idx, (ws_date, we_date) in enumerate(windows):
             if ws_date <= d_date <= we_date:
-                window_bills[idx].append({"name": b["name"], "val": b["val"], "is_temp": False, "is_shortfall": False})
+                window_bills[idx].append({"name": b["name"], "val": b["val"], "is_temp": False, "is_shortfall": False, "is_sf": False})
 
-# Map Weekly/Fortnightly Obligations
+# 3. Map Weekly/Fortnightly Obligations
 for idx, (ws_date, we_date) in enumerate(windows):
     for b in st.session_state.weekly_bills:
         if b["freq"] == "Weekly":
-            window_bills[idx].append({"name": b["name"], "val": b["val"], "is_temp": False, "is_shortfall": False})
+            window_bills[idx].append({"name": b["name"], "val": b["val"], "is_temp": False, "is_shortfall": False, "is_sf": False})
         else:
             if idx % 2 == 0:
-                window_bills[idx].append({"name": b["name"], "val": b["val"], "is_temp": False, "is_shortfall": False})
+                window_bills[idx].append({"name": b["name"], "val": b["val"], "is_temp": False, "is_shortfall": False, "is_sf": False})
 
-# Map Afterpay Ledger
+# 4. Map Afterpay Ledger
 for plan in st.session_state.afterpay_ledger:
-    window_bills[0].append({"name": f"🛍️ AP: {plan['Merchant']}", "val": plan["Fortnightly Cost"], "is_temp": False, "is_shortfall": False})
-    window_bills[2].append({"name": f"🛍️ AP: {plan['Merchant']}", "val": plan["Fortnightly Cost"], "is_temp": False, "is_shortfall": False})
+    window_bills[0].append({"name": f"🛍️ AP: {plan['Merchant']}", "val": plan["Fortnightly Cost"], "is_temp": False, "is_shortfall": False, "is_sf": False})
+    window_bills[2].append({"name": f"🛍️ AP: {plan['Merchant']}", "val": plan["Fortnightly Cost"], "is_temp": False, "is_shortfall": False, "is_sf": False})
 
-# Inject Custom One-Off Specific Weekly Temporary Expenses
+# 5. Inject Custom One-Off Specific Weekly Temporary Expenses
 for t_exp in cloud_data["temporary_expenses"]:
     target_idx = t_exp["week_target"]
     if 0 <= target_idx < 4:
-        window_bills[target_idx].append({"name": f"⚠️ {t_exp['name']}", "val": t_exp["val"], "is_temp": True, "is_shortfall": False})
+        window_bills[target_idx].append({"name": f"⚠️ {t_exp['name']}", "val": t_exp["val"], "is_temp": True, "is_shortfall": False, "is_sf": False})
 
 # --- RENDER CLOUD-PERSISTENT INPUT COLUMNS W/ SHORTFALL INTELLIGENCE ---
 cols_matrix = st.columns(4)
@@ -363,12 +374,12 @@ for i in range(4):
     ws_date, we_date = windows[i]
     cloud_val = cloud_data["saved_weekly_pay"].get(i, 1200.0)
     
-    # Calculate regular bills assigned specifically to this block first
+    # Calculate total bills assigned specifically to this block
     base_bills_sum = sum(b["val"] for b in window_bills[i])
     
     # Prepend visually if a structural shortfall is being rolled over
     if running_shortfall > 0:
-        window_bills[i].insert(0, {"name": "🚨 Prev Week Shortfall", "val": running_shortfall, "is_temp": False, "is_shortfall": True})
+        window_bills[i].insert(0, {"name": "🚨 Prev Week Shortfall", "val": running_shortfall, "is_temp": False, "is_shortfall": True, "is_sf": False})
         
     full_bills_sum = base_bills_sum + running_shortfall
     
@@ -411,13 +422,15 @@ for i in range(4):
                 row_style = "background-color: #3b1818; padding: 6px 12px; margin-top: 4px; border-radius: 4px; border-left: 3px solid #ff4444; display: flex; justify-content: space-between;"
             elif item.get("is_temp", False):
                 row_style = "background-color: #281c1c; padding: 6px 12px; margin-top: 4px; border-radius: 4px; border-left: 3px solid #f25c5c; display: flex; justify-content: space-between;"
+            elif item.get("is_sf", False):
+                row_style = "background-color: #112419; padding: 6px 12px; margin-top: 4px; border-radius: 4px; border-left: 3px solid #00e676; display: flex; justify-content: space-between;"
             else:
                 row_style = "background-color: #21262d; padding: 6px 12px; margin-top: 4px; border-radius: 4px; border-left: 3px solid #58a6ff; display: flex; justify-content: space-between;"
             
             st.markdown(f"""
             <div style="{row_style}">
                 <span>{item['name']}</span>
-                <span style="font-weight: bold;">${item['val']:.0f}</span>
+                <span style="font-weight: bold;">${item['val']:.2f}</span>
             </div>
             """, unsafe_allow_html=True)
 
