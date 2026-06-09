@@ -274,10 +274,15 @@ RAW_WEEKLY = [
     {"name": "Isuzu mux", "val": 714.00, "freq": "Fortnightly"}, {"name": "TAX", "val": 65.00, "freq": "Fortnightly"}
 ]
 
+# 🎯 YOUR ACTUAL BILL SINKING FUNDS SCHEDULE
 RAW_LONG_TERM = [
-    {"name": "Rego / Car Costs (Estimated)", "val": 400.00, "freq": "Quarterly"},
-    {"name": "Six-Month Health/Tech Check", "val": 250.00, "freq": "6-Month"},
-    {"name": "Yearly Membership Obligations", "val": 180.00, "freq": "Yearly"}
+    {"name": "Water Bill", "val": 100.00, "freq": "Quarterly", "day": "27 June"},
+    {"name": "Electricity Bill", "val": 550.00, "freq": "Quarterly", "day": "27 June"},
+    {"name": "NRMA CTP Insurance", "val": 305.00, "freq": "6-Month", "day": "Bi-Annual"},
+    {"name": "Car Rego", "val": 335.00, "freq": "6-Month", "day": "Bi-Annual"},
+    {"name": "Costco Membership", "val": 60.00, "freq": "Yearly", "day": "30 April"},
+    {"name": "PlayStation Plus", "val": 215.00, "freq": "Yearly", "day": "18 August"},
+    {"name": "McCafe Annual Fund", "val": 150.00, "freq": "Yearly", "day": "16 October"}
 ]
 
 BASE_MONTHLY = [b for b in RAW_MONTHLY if b["name"] not in cloud_data["deleted_baseline"]]
@@ -294,7 +299,7 @@ for item in cloud_data["custom_expenses"]:
     elif item["freq"] == "Monthly": st.session_state.monthly_bills.append(item)
     elif item["freq"] in ["Quarterly", "6-Month", "Yearly"]: st.session_state.long_term_bills.append(item)
 
-# Sinking Fund Reference Totals (With Multi-Month Cycles Restored)
+# Sinking Fund Reference Totals Math (Exact Multi-Month Slices)
 sum_fixed_monthly = sum((b["val"] * 12) / 52 for b in st.session_state.monthly_bills)
 sum_fixed_weekly = sum(b["val"] if b["freq"] == "Weekly" else b["val"] / 2 for b in st.session_state.weekly_bills)
 
@@ -476,7 +481,7 @@ with tab_segments:
             if b['freq'] == 'Quarterly': w_val = (b['val'] * 4) / 52
             elif b['freq'] == '6-Month': w_val = (b['val'] * 2) / 52
             else: w_val = b['val'] / 52
-            render_slice_item(b['name'], b['val'], w_val, f"lng_{idx}", date_badge=b['freq'])
+            render_slice_item(b['name'], b['val'], w_val, f"lng_{idx}", date_badge=b.get('day', b['freq']))
 
 with tab_spend_track:
     st.markdown("### 💰 Quick-Deduct Spending Buffers")
