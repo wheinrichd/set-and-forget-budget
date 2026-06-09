@@ -271,7 +271,8 @@ RAW_WEEKLY = [
     {"name": "Emergency Fund", "val": 100.00, "freq": "Weekly"}, {"name": "Church", "val": 170.00, "freq": "Weekly"},
     {"name": "Fuel Buffer", "val": 100.00, "freq": "Weekly"}, {"name": "Grocery Buffer", "val": 150.00, "freq": "Weekly"},
     {"name": "Rent (Cambridge)", "val": 480.00, "freq": "Weekly"}, {"name": "Gym", "val": 91.00, "freq": "Fortnightly"},
-    {"name": "Isuzu mux", "val": 714.00, "freq": "Fortnightly"}, {"name": "TAX", "val": 65.00, "freq": "Fortnightly"}
+    {"name": "Isuzu mux", "val": 714.00, "freq": "Fortnightly"}, {"name": "TAX", "val": 65.00, "freq": "Fortnightly"},
+    {"name": "Bakery Movement", "val": 180.00, "freq": "Weekly"}  # ✅ NEW FIXED WEEKLY BASELINE INJECTED HERE
 ]
 
 BASE_MONTHLY = [b for b in RAW_MONTHLY if b["name"] not in cloud_data["deleted_baseline"]]
