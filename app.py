@@ -267,12 +267,11 @@ RAW_MONTHLY = [
     {"name": "Zip", "val": 100.00, "day": "30th"}
 ]
 
+# 📋 CLEAN ARCHITECTURE DIRECT FROM YOUR EXACT WEEKLY BASELINE BREAKDOWN
 RAW_WEEKLY = [
-    {"name": "Emergency Fund", "val": 100.00, "freq": "Weekly"}, {"name": "Church", "val": 170.00, "freq": "Weekly"},
-    {"name": "Fuel Buffer", "val": 100.00, "freq": "Weekly"}, {"name": "Grocery Buffer", "val": 150.00, "freq": "Weekly"},
-    {"name": "Rent (Cambridge)", "val": 480.00, "freq": "Weekly"}, {"name": "Gym", "val": 91.00, "freq": "Fortnightly"},
-    {"name": "Isuzu mux", "val": 714.00, "freq": "Fortnightly"}, {"name": "TAX", "val": 65.00, "freq": "Fortnightly"},
-    {"name": "Bakery Movement", "val": 180.00, "freq": "Weekly"}  # ✅ NEW FIXED WEEKLY BASELINE INJECTED HERE
+    {"name": "Standard Weekly Expenses", "val": 750.00, "freq": "Weekly"},
+    {"name": "Fortnightly Allocations", "val": 435.00, "freq": "Fortnightly"},
+    {"name": "Quarterly Allocations", "val": 50.00, "freq": "Quarterly"}
 ]
 
 BASE_MONTHLY = [b for b in RAW_MONTHLY if b["name"] not in cloud_data["deleted_baseline"]]
@@ -283,12 +282,19 @@ st.session_state.weekly_bills = list(BASE_WEEKLY)
 st.session_state.afterpay_ledger = cloud_data["afterpay_ledger"]
 
 for item in cloud_data["custom_expenses"]:
-    if item["freq"] in ["Weekly", "Fortnightly"]: st.session_state.weekly_bills.append(item)
+    if item["freq"] in ["Weekly", "Fortnightly", "Quarterly"]: st.session_state.weekly_bills.append(item)
     elif item["freq"] == "Monthly": st.session_state.monthly_bills.append(item)
 
 # Sinking Fund Reference Total
 sum_fixed_monthly = sum((b["val"] * 12) / 52 for b in st.session_state.monthly_bills)
-sum_fixed_weekly = sum(b["val"] if b["freq"] == "Weekly" else b["val"] / 2 for b in st.session_state.weekly_bills)
+
+# Adjusted math to properly break down custom structural frequencies
+sum_fixed_weekly = 0
+for b in st.session_state.weekly_bills:
+    if b["freq"] == "Weekly": sum_fixed_weekly += b["val"]
+    elif b["freq"] == "Fortnightly": sum_fixed_weekly += (b["val"] / 2)
+    elif b["freq"] == "Quarterly": sum_fixed_weekly += (b["val"] / 13)
+
 total_weekly_sum = sum_fixed_monthly + sum_fixed_weekly + sum(p["Fortnightly Cost"] / 2 for p in st.session_state.afterpay_ledger)
 
 st.title("🛡️ 4-Week Paycheck Horizon Matrix")
@@ -315,14 +321,18 @@ for b in st.session_state.monthly_bills:
             if ws_date <= d_date <= we_date:
                 window_bills[idx].append({"name": b["name"], "val": b["val"], "is_temp": False})
 
-# Map Weekly/Fortnightly Obligations
+# Map Weekly/Fortnightly/Quarterly Obligations directly to column horizons
 for idx, (ws_date, we_date) in enumerate(windows):
     for b in st.session_state.weekly_bills:
         if b["freq"] == "Weekly":
             window_bills[idx].append({"name": b["name"], "val": b["val"], "is_temp": False})
-        else:
+        elif b["freq"] == "Fortnightly":
+            # Hits every alternating paycheck cycle window
             if idx % 2 == 0:
                 window_bills[idx].append({"name": b["name"], "val": b["val"], "is_temp": False})
+        elif b["freq"] == "Quarterly":
+            # Divides cleanly across rolling weeks to match structural baseline flow
+            window_bills[idx].append({"name": f"⏳ {b['name']}", "val": b["val"], "is_temp": False})
 
 # Map Afterpay Ledger
 for plan in st.session_state.afterpay_ledger:
@@ -407,7 +417,7 @@ def render_slice_item(name_str, full_amt, weekly_amt, item_index, date_badge="")
         st.markdown(f"""
             <div class="{style_class}">
                 {strike_start}<b>{name_str}</b>{badge_html}<br>
-                Full Bill: ${full_amt:,.2f} | <span style="{color_text}">Weekly Segment Reference: ${weekly_amt:,.2f}/wk</span>{strike_end}
+                Full Amount: ${full_amt:,.2f} | <span style="{color_text}">Weekly Equivalent: ${weekly_amt:,.2f}/wk</span>{strike_end}
             </div>
         """, unsafe_allow_html=True)
     with col_btn:
@@ -422,7 +432,7 @@ def render_slice_item(name_str, full_amt, weekly_amt, item_index, date_badge="")
                 st.rerun()
 
 with tab_segments:
-    st.markdown(f"### 📊 Long-Term Target Slices (Your Ideal Target Transfer: **${total_weekly_sum:,.2f}/wk**)")
+    st.markdown(f"### 📊 Structural Target Slices (Your Ideal Target Transfer: **${total_weekly_sum:,.2f}/wk**)")
     col_left, col_right = st.columns(2)
     with col_left:
         st.markdown("<div class='category-header'><h4>🗓️ Fixed Monthly Slices (Weekly Values)</h4></div>", unsafe_allow_html=True)
@@ -431,9 +441,11 @@ with tab_segments:
             render_slice_item(b['name'], b['val'], w_val, f"mon_{idx}", date_badge=b['day'])
             
     with col_right:
-        st.markdown("<div class='category-header'><h4>⏳ Weekly & Fortnightly Base Slices</h4></div>", unsafe_allow_html=True)
+        st.markdown("<div class='category-header'><h4>⏳ Fixed Structural Baseline Slices</h4></div>", unsafe_allow_html=True)
         for idx, b in enumerate(st.session_state.weekly_bills):
-            w_val = b['val'] if b['freq'] == 'Weekly' else b['val'] / 2
+            if b["freq"] == "Weekly": w_val = b['val']
+            elif b["freq"] == "Fortnightly": w_val = b['val'] / 2
+            elif b["freq"] == "Quarterly": w_val = b['val'] / 13
             render_slice_item(b['name'], b['val'], w_val, f"wek_{idx}", date_badge=b.get('freq'))
 
 with tab_spend_track:
@@ -506,7 +518,7 @@ with tab_add_expense:
     with st.form("custom_expense_form", clear_on_submit=True):
         new_name = st.text_input("Expense Description Name")
         col_f, col_a = st.columns(2)
-        new_freq = col_f.selectbox("Billing Cycle Frequency", ["Weekly", "Fortnightly", "Monthly"])
+        new_freq = col_f.selectbox("Billing Cycle Frequency", ["Weekly", "Fortnightly", "Quarterly", "Monthly"])
         new_amt = col_a.number_input("Full Bill Amount ($)", min_value=0.0, step=10.0)
         new_day = st.text_input("Due Day of Month (e.g. '14th')", value="1st")
         if st.form_submit_button("Upload to Google Sheets"):
