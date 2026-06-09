@@ -274,21 +274,37 @@ RAW_WEEKLY = [
     {"name": "Isuzu mux", "val": 714.00, "freq": "Fortnightly"}, {"name": "TAX", "val": 65.00, "freq": "Fortnightly"}
 ]
 
+RAW_LONG_TERM = [
+    {"name": "Rego / Car Costs (Estimated)", "val": 400.00, "freq": "Quarterly"},
+    {"name": "Six-Month Health/Tech Check", "val": 250.00, "freq": "6-Month"},
+    {"name": "Yearly Membership Obligations", "val": 180.00, "freq": "Yearly"}
+]
+
 BASE_MONTHLY = [b for b in RAW_MONTHLY if b["name"] not in cloud_data["deleted_baseline"]]
 BASE_WEEKLY = [b for b in RAW_WEEKLY if b["name"] not in cloud_data["deleted_baseline"]]
+BASE_LONG_TERM = [b for b in RAW_LONG_TERM if b["name"] not in cloud_data["deleted_baseline"]]
 
 st.session_state.monthly_bills = list(BASE_MONTHLY)
 st.session_state.weekly_bills = list(BASE_WEEKLY)
+st.session_state.long_term_bills = list(BASE_LONG_TERM)
 st.session_state.afterpay_ledger = cloud_data["afterpay_ledger"]
 
 for item in cloud_data["custom_expenses"]:
     if item["freq"] in ["Weekly", "Fortnightly"]: st.session_state.weekly_bills.append(item)
     elif item["freq"] == "Monthly": st.session_state.monthly_bills.append(item)
+    elif item["freq"] in ["Quarterly", "6-Month", "Yearly"]: st.session_state.long_term_bills.append(item)
 
-# Sinking Fund Reference Total
+# Sinking Fund Reference Totals (With Multi-Month Cycles Restored)
 sum_fixed_monthly = sum((b["val"] * 12) / 52 for b in st.session_state.monthly_bills)
 sum_fixed_weekly = sum(b["val"] if b["freq"] == "Weekly" else b["val"] / 2 for b in st.session_state.weekly_bills)
-total_weekly_sum = sum_fixed_monthly + sum_fixed_weekly + sum(p["Fortnightly Cost"] / 2 for p in st.session_state.afterpay_ledger)
+
+sum_long_term = 0.0
+for b in st.session_state.long_term_bills:
+    if b["freq"] == "Quarterly": sum_long_term += (b["val"] * 4) / 52
+    elif b["freq"] == "6-Month": sum_long_term += (b["val"] * 2) / 52
+    elif b["freq"] == "Yearly": sum_long_term += b["val"] / 52
+
+total_weekly_sum = sum_fixed_monthly + sum_fixed_weekly + sum_long_term + sum(p["Fortnightly Cost"] / 2 for p in st.session_state.afterpay_ledger)
 
 st.title("🛡️ 4-Week Paycheck Horizon Matrix")
 st.caption("Change individual paycheck boxes below dynamically based on your exact hours or scheduled income for that specific week.")
@@ -312,32 +328,45 @@ for b in st.session_state.monthly_bills:
         d_date = get_due_date_details(b["day"], target_month_offset=offset)
         for idx, (ws_date, we_date) in enumerate(windows):
             if ws_date <= d_date <= we_date:
-                window_bills[idx].append({"name": b["name"], "val": b["val"], "is_temp": False})
+                window_bills[idx].append({"name": b["name"], "val": b["val"], "is_temp": False, "is_shortfall": False})
 
 # Map Weekly/Fortnightly Obligations
 for idx, (ws_date, we_date) in enumerate(windows):
     for b in st.session_state.weekly_bills:
         if b["freq"] == "Weekly":
-            window_bills[idx].append({"name": b["name"], "val": b["val"], "is_temp": False})
+            window_bills[idx].append({"name": b["name"], "val": b["val"], "is_temp": False, "is_shortfall": False})
         else:
             if idx % 2 == 0:
-                window_bills[idx].append({"name": b["name"], "val": b["val"], "is_temp": False})
+                window_bills[idx].append({"name": b["name"], "val": b["val"], "is_temp": False, "is_shortfall": False})
 
 # Map Afterpay Ledger
 for plan in st.session_state.afterpay_ledger:
-    window_bills[0].append({"name": f"🛍️ AP: {plan['Merchant']}", "val": plan["Fortnightly Cost"], "is_temp": False})
-    window_bills[2].append({"name": f"🛍️ AP: {plan['Merchant']}", "val": plan["Fortnightly Cost"], "is_temp": False})
+    window_bills[0].append({"name": f"🛍️ AP: {plan['Merchant']}", "val": plan["Fortnightly Cost"], "is_temp": False, "is_shortfall": False})
+    window_bills[2].append({"name": f"🛍️ AP: {plan['Merchant']}", "val": plan["Fortnightly Cost"], "is_temp": False, "is_shortfall": False})
 
 # Inject Custom One-Off Specific Weekly Temporary Expenses
 for t_exp in cloud_data["temporary_expenses"]:
     target_idx = t_exp["week_target"]
     if 0 <= target_idx < 4:
-        window_bills[target_idx].append({"name": f"⚠️ {t_exp['name']}", "val": t_exp["val"], "is_temp": True})
+        window_bills[target_idx].append({"name": f"⚠️ {t_exp['name']}", "val": t_exp["val"], "is_temp": True, "is_shortfall": False})
 
-# --- RENDER CLOUD-PERSISTENT INPUT COLUMNS ---
+# --- RENDER CLOUD-PERSISTENT INPUT COLUMNS W/ SHORTFALL INTELLIGENCE ---
 cols_matrix = st.columns(4)
+running_shortfall = 0.0
+
 for i in range(4):
     ws_date, we_date = windows[i]
+    cloud_val = cloud_data["saved_weekly_pay"].get(i, 1200.0)
+    
+    # Calculate regular bills assigned specifically to this block first
+    base_bills_sum = sum(b["val"] for b in window_bills[i])
+    
+    # Prepend visually if a structural shortfall is being rolled over
+    if running_shortfall > 0:
+        window_bills[i].insert(0, {"name": "🚨 Prev Week Shortfall", "val": running_shortfall, "is_temp": False, "is_shortfall": True})
+        
+    full_bills_sum = base_bills_sum + running_shortfall
+    
     with cols_matrix[i]:
         st.markdown(f"""
         <div class="paycheck-window-card">
@@ -345,8 +374,6 @@ for i in range(4):
             <span style="color: #8b949e; font-size: 0.82em;">📅 {ws_date.strftime('%d %b')} - {we_date.strftime('%d %b')}</span>
         </div>
         """, unsafe_allow_html=True)
-        
-        cloud_val = cloud_data["saved_weekly_pay"].get(i, 1200.0)
         
         this_weeks_pay = st.number_input(
             "Income ($)",
@@ -363,20 +390,27 @@ for i in range(4):
             time.sleep(0.4)
             st.rerun()
         
-        full_bills_sum = sum(b["val"] for b in window_bills[i])
         net_leftover = this_weeks_pay - full_bills_sum
         
         st.metric(label="Total Owed Full", value=f"${full_bills_sum:,.2f}")
         if net_leftover >= 0:
             st.success(f"Leftover: ${net_leftover:,.2f}")
+            running_shortfall = 0.0
         else:
             st.error(f"Shortfall: ${net_leftover:,.2f}")
+            running_shortfall = abs(net_leftover)
             
         st.write("---")
         for item in window_bills[i]:
-            row_style = "temp-bill-row" if item.get("is_temp", False) else "bill-alert-row"
+            if item.get("is_shortfall"):
+                row_style = "background-color: #3b1818; padding: 6px 12px; margin-top: 4px; border-radius: 4px; border-left: 3px solid #ff4444; display: flex; justify-content: space-between;"
+            elif item.get("is_temp", False):
+                row_style = "background-color: #281c1c; padding: 6px 12px; margin-top: 4px; border-radius: 4px; border-left: 3px solid #f25c5c; display: flex; justify-content: space-between;"
+            else:
+                row_style = "background-color: #21262d; padding: 6px 12px; margin-top: 4px; border-radius: 4px; border-left: 3px solid #58a6ff; display: flex; justify-content: space-between;"
+            
             st.markdown(f"""
-            <div class="{row_style}">
+            <div style="{row_style}">
                 <span>{item['name']}</span>
                 <span style="font-weight: bold;">${item['val']:.0f}</span>
             </div>
@@ -422,18 +456,27 @@ def render_slice_item(name_str, full_amt, weekly_amt, item_index, date_badge="")
 
 with tab_segments:
     st.markdown(f"### 📊 Long-Term Target Slices (Your Ideal Target Transfer: **${total_weekly_sum:,.2f}/wk**)")
-    col_left, col_right = st.columns(2)
+    col_left, col_mid, col_right = st.columns(3)
+    
     with col_left:
         st.markdown("<div class='category-header'><h4>🗓️ Fixed Monthly Slices (Weekly Values)</h4></div>", unsafe_allow_html=True)
         for idx, b in enumerate(st.session_state.monthly_bills):
             w_val = (b['val'] * 12) / 52
             render_slice_item(b['name'], b['val'], w_val, f"mon_{idx}", date_badge=b['day'])
             
-    with col_right:
+    with col_mid:
         st.markdown("<div class='category-header'><h4>⏳ Weekly & Fortnightly Base Slices</h4></div>", unsafe_allow_html=True)
         for idx, b in enumerate(st.session_state.weekly_bills):
             w_val = b['val'] if b['freq'] == 'Weekly' else b['val'] / 2
             render_slice_item(b['name'], b['val'], w_val, f"wek_{idx}", date_badge=b.get('freq'))
+
+    with col_right:
+        st.markdown("<div class='category-header'><h4>🦅 Quarterly, 6-Month & Annual Sinking Funds</h4></div>", unsafe_allow_html=True)
+        for idx, b in enumerate(st.session_state.long_term_bills):
+            if b['freq'] == 'Quarterly': w_val = (b['val'] * 4) / 52
+            elif b['freq'] == '6-Month': w_val = (b['val'] * 2) / 52
+            else: w_val = b['val'] / 52
+            render_slice_item(b['name'], b['val'], w_val, f"lng_{idx}", date_badge=b['freq'])
 
 with tab_spend_track:
     st.markdown("### 💰 Quick-Deduct Spending Buffers")
@@ -505,7 +548,7 @@ with tab_add_expense:
     with st.form("custom_expense_form", clear_on_submit=True):
         new_name = st.text_input("Expense Description Name")
         col_f, col_a = st.columns(2)
-        new_freq = col_f.selectbox("Billing Cycle Frequency", ["Weekly", "Fortnightly", "Monthly"])
+        new_freq = col_f.selectbox("Billing Cycle Frequency", ["Weekly", "Fortnightly", "Monthly", "Quarterly", "6-Month", "Yearly"])
         new_amt = col_a.number_input("Full Bill Amount ($)", min_value=0.0, step=10.0)
         new_day = st.text_input("Due Day of Month (e.g. '14th')", value="1st")
         if st.form_submit_button("Upload to Google Sheets"):
@@ -542,7 +585,6 @@ with tab_afterpay:
         for idx, plan in enumerate(st.session_state.afterpay_ledger):
             c_left, c_right = st.columns([4, 1])
             with c_left:
-                pct_paid = ((4 - plan['Remaining']) / 4.0)
                 st.markdown(f"🛍️ **{plan['Merchant']}** | Fortnightly Cost: ${plan['Fortnightly Cost']:,.2f} ({plan['Remaining']} payments left)")
             with c_right:
                 if st.button("❌ Clear", key=f"del_ap_{plan['Merchant']}_{idx}"):
