@@ -48,6 +48,16 @@ st.markdown("""
         justify-content: space-between;
     }
     
+    .temp-bill-row {
+        background-color: #281c1c;
+        padding: 6px 12px;
+        margin-top: 4px;
+        border-radius: 4px;
+        border-left: 3px solid #f25c5c;
+        display: flex;
+        justify-content: space-between;
+    }
+    
     .slice-container {
         background-color: #1f242c;
         border-left: 4px solid #00e676;
@@ -109,10 +119,10 @@ def load_cloud_data():
     custom_expenses = []
     afterpay_ledger = []
     spending_log = []
+    temporary_expenses = []
     paid_slices = set()
     deleted_baseline = set()
     
-    # Core Weekly Income Matrix Memory Defaults
     saved_weekly_pay = {0: 1200.0, 1: 1200.0, 2: 1200.0, 3: 1200.0}
     
     today = datetime.date.today()
@@ -132,6 +142,23 @@ def load_cloud_data():
                         wk_val = float(str(row.iloc[1]).replace('$', '').replace(',', '').strip())
                         if wk_idx in saved_weekly_pay:
                             saved_weekly_pay[wk_idx] = wk_val
+                    except: pass
+    except: pass
+
+    # Fetch One-Off Specific Weekly Temporary Expenses
+    try:
+        url_temp = get_csv_download_url(GOOGLE_SHEET_URL, "temporary_expenses")
+        if url_temp:
+            url_temp += f"&cache_bust={int(time.time())}"
+            df_temp = pd.read_csv(url_temp)
+            if len(df_temp) > 0:
+                for _, row in df_temp.iterrows():
+                    try:
+                        temporary_expenses.append({
+                            "week_target": int(row.iloc[0]),
+                            "name": str(row.iloc[1]).strip(),
+                            "val": float(str(row.iloc[2]).replace('$', '').replace(',', '').strip())
+                        })
                     except: pass
     except: pass
 
@@ -219,7 +246,7 @@ def load_cloud_data():
                     except: pass
     except: pass
         
-    return {"custom_expenses": custom_expenses, "afterpay_ledger": afterpay_ledger, "spending_log": spending_log, "paid_slices": paid_slices, "deleted_baseline": deleted_baseline, "saved_weekly_pay": saved_weekly_pay}
+    return {"custom_expenses": custom_expenses, "afterpay_ledger": afterpay_ledger, "spending_log": spending_log, "paid_slices": paid_slices, "deleted_baseline": deleted_baseline, "saved_weekly_pay": saved_weekly_pay, "temporary_expenses": temporary_expenses}
 
 cloud_data = load_cloud_data()
 
@@ -285,21 +312,27 @@ for b in st.session_state.monthly_bills:
         d_date = get_due_date_details(b["day"], target_month_offset=offset)
         for idx, (ws_date, we_date) in enumerate(windows):
             if ws_date <= d_date <= we_date:
-                window_bills[idx].append({"name": b["name"], "val": b["val"]})
+                window_bills[idx].append({"name": b["name"], "val": b["val"], "is_temp": False})
 
 # Map Weekly/Fortnightly Obligations
 for idx, (ws_date, we_date) in enumerate(windows):
     for b in st.session_state.weekly_bills:
         if b["freq"] == "Weekly":
-            window_bills[idx].append({"name": b["name"], "val": b["val"]})
+            window_bills[idx].append({"name": b["name"], "val": b["val"], "is_temp": False})
         else:
             if idx % 2 == 0:
-                window_bills[idx].append({"name": b["name"], "val": b["val"]})
+                window_bills[idx].append({"name": b["name"], "val": b["val"], "is_temp": False})
 
 # Map Afterpay Ledger
 for plan in st.session_state.afterpay_ledger:
-    window_bills[0].append({"name": f"🛍️ AP: {plan['Merchant']}", "val": plan["Fortnightly Cost"]})
-    window_bills[2].append({"name": f"🛍️ AP: {plan['Merchant']}", "val": plan["Fortnightly Cost"]})
+    window_bills[0].append({"name": f"🛍️ AP: {plan['Merchant']}", "val": plan["Fortnightly Cost"], "is_temp": False})
+    window_bills[2].append({"name": f"🛍️ AP: {plan['Merchant']}", "val": plan["Fortnightly Cost"], "is_temp": False})
+
+# Inject Custom One-Off Specific Weekly Temporary Expenses
+for t_exp in cloud_data["temporary_expenses"]:
+    target_idx = t_exp["week_target"]
+    if 0 <= target_idx < 4:
+        window_bills[target_idx].append({"name": f"⚠️ {t_exp['name']}", "val": t_exp["val"], "is_temp": True})
 
 # --- RENDER CLOUD-PERSISTENT INPUT COLUMNS ---
 cols_matrix = st.columns(4)
@@ -313,27 +346,22 @@ for i in range(4):
         </div>
         """, unsafe_allow_html=True)
         
-        # Pull saved cloud data as baseline
-        cloud_val = cloud_data["saved_weekly_pay"][i]
+        cloud_val = cloud_data["saved_weekly_pay"].get(i, 1200.0)
         
-        c_input, c_btn = st.columns([3, 1])
-        with c_input:
-            this_weeks_pay = st.number_input(
-                "Income ($)",
-                min_value=0.0,
-                value=float(cloud_val),
-                step=50.0,
-                key=f"pay_input_wk_{i}",
-                label_visibility="collapsed"
-            )
-        with c_btn:
-            # 💾 THE PERMANENT LOCKER FIX: Commits this specific week's number directly to the sheet
-            if st.button("💾", key=f"save_wk_btn_{i}", help="Lock income permanently into Google Sheet"):
-                requests.post(APPS_SCRIPT_URL, json={"action": "delete", "sheetName": "weekly_income_memory", "targetName": str(i)})
-                requests.post(APPS_SCRIPT_URL, json={"action": "add", "sheetName": "weekly_income_memory", "rowData": [i, this_weeks_pay]})
-                st.success("Locked!")
-                time.sleep(0.4)
-                st.rerun()
+        this_weeks_pay = st.number_input(
+            "Income ($)",
+            min_value=0.0,
+            value=float(cloud_val),
+            step=50.0,
+            key=f"pay_input_wk_{i}"
+        )
+        
+        if st.button(f"💾 Save Week {i+1} Income", key=f"save_wk_btn_{i}", use_container_width=True):
+            requests.post(APPS_SCRIPT_URL, json={"action": "delete", "sheetName": "weekly_income_memory", "targetName": str(i)})
+            requests.post(APPS_SCRIPT_URL, json={"action": "add", "sheetName": "weekly_income_memory", "rowData": [i, this_weeks_pay]})
+            st.success(f"Week {i+1} Saved!")
+            time.sleep(0.4)
+            st.rerun()
         
         full_bills_sum = sum(b["val"] for b in window_bills[i])
         net_leftover = this_weeks_pay - full_bills_sum
@@ -346,8 +374,9 @@ for i in range(4):
             
         st.write("---")
         for item in window_bills[i]:
+            row_style = "temp-bill-row" if item.get("is_temp", False) else "bill-alert-row"
             st.markdown(f"""
-            <div class="bill-alert-row">
+            <div class="{row_style}">
                 <span>{item['name']}</span>
                 <span style="font-weight: bold;">${item['val']:.0f}</span>
             </div>
@@ -356,9 +385,10 @@ for i in range(4):
 st.markdown("---")
 
 # --- CONSOLE TABS FOR REFERENCE AND LOGS ---
-tab_segments, tab_spend_track, tab_add_expense, tab_afterpay = st.tabs([
+tab_segments, tab_spend_track, tab_oneoff_temp, tab_add_expense, tab_afterpay = st.tabs([
     "🗂️ Weekly Segment Core Reference", 
     "💰 Fuel & Grocery Loggers",
+    "🚨 One-Off Week Expenses",
     "➕ Add New Custom Expense", 
     "🛍️ Afterpay Intercept Guard"
 ])
@@ -444,6 +474,31 @@ with tab_spend_track:
         if st.button("🔥 Clear Weekly Logs", key="clear_spend", type="primary", use_container_width=True):
             requests.post(APPS_SCRIPT_URL, json={"action": "clear_all_rows", "sheetName": "spending_log"})
             st.rerun()
+
+with tab_oneoff_temp:
+    st.markdown("### 🚨 Add Temporary One-Off Expense to a Specific Week")
+    st.caption("Perfect for unexpected costs that happen once, allowing you to intercept a specific paycheck row.")
+    with st.form("temporary_expense_form", clear_on_submit=True):
+        target_wk_sel = st.selectbox("Target Paycheck Card Location", ["Week 1", "Week 2", "Week 3", "Week 4"])
+        temp_name = st.text_input("Expense Title (e.g. 'Car Mechanic', 'Birthday Gift')")
+        temp_amt = st.number_input("Amount Owed ($)", min_value=0.0, step=10.0)
+        
+        if st.form_submit_button("Inject into Target Week Row"):
+            if temp_name and temp_amt > 0:
+                wk_mapping = {"Week 1": 0, "Week 2": 1, "Week 3": 2, "Week 4": 3}
+                payload = {"action": "add", "sheetName": "temporary_expenses", "rowData": [wk_mapping[target_wk_sel], temp_name, temp_amt]}
+                requests.post(APPS_SCRIPT_URL, json=payload)
+                st.success(f"Injected into {target_wk_sel}!"); time.sleep(0.5); st.rerun()
+
+    if cloud_data["temporary_expenses"]:
+        st.markdown("<div class='category-header'><h4>🗑️ Active Temporary Expenses (Click to Remove / Pay Off)</h4></div>", unsafe_allow_html=True)
+        for idx, item in enumerate(cloud_data["temporary_expenses"]):
+            c_left, c_right = st.columns([4, 1])
+            with c_left: st.markdown(f"🚨 **Week {item['week_target']+1}** | {item['name']}: **${item['val']:,.2f}**")
+            with c_right:
+                if st.button("✅ Remove / Paid Off", key=f"del_temp_{item['name']}_{idx}"):
+                    requests.post(APPS_SCRIPT_URL, json={"action": "delete", "sheetName": "temporary_expenses", "targetName": item['name']})
+                    st.rerun()
 
 with tab_add_expense:
     st.markdown("### ➕ Google Sheet Custom Expense Injection")
