@@ -346,13 +346,18 @@ for b in st.session_state.monthly_bills:
             if ws_date <= d_date <= we_date:
                 window_bills[idx].append({"name": b["name"], "val": b["val"], "is_temp": False, "is_shortfall": False, "is_sf": False})
 
-# 3. Map Weekly/Fortnightly Obligations
+# 3. Map Weekly/Fortnightly Obligations (With Accurate Calendar-Linked Alignment)
+FORTNIGHT_ANCHOR_DATE = datetime.date(2026, 6, 17)
+
 for idx, (ws_date, we_date) in enumerate(windows):
     for b in st.session_state.weekly_bills:
         if b["freq"] == "Weekly":
             window_bills[idx].append({"name": b["name"], "val": b["val"], "is_temp": False, "is_shortfall": False, "is_sf": False})
         else:
-            if idx % 2 == 0:
+            weeks_away = int((ws_date - FORTNIGHT_ANCHOR_DATE).days / 7)
+            is_matching_fortnight = (weeks_away % 2 == 0)
+            
+            if is_matching_fortnight:
                 window_bills[idx].append({"name": b["name"], "val": b["val"], "is_temp": False, "is_shortfall": False, "is_sf": False})
 
 # 4. Map Afterpay Ledger
@@ -374,10 +379,8 @@ for i in range(4):
     ws_date, we_date = windows[i]
     cloud_val = cloud_data["saved_weekly_pay"].get(i, 1200.0)
     
-    # Calculate total bills assigned specifically to this block
     base_bills_sum = sum(b["val"] for b in window_bills[i])
     
-    # Prepend visually if a structural shortfall is being rolled over
     if running_shortfall > 0:
         window_bills[i].insert(0, {"name": "🚨 Prev Week Shortfall", "val": running_shortfall, "is_temp": False, "is_shortfall": True, "is_sf": False})
         
@@ -554,11 +557,12 @@ with tab_oneoff_temp:
     if cloud_data["temporary_expenses"]:
         st.markdown("<div class='category-header'><h4>🗑️ Active Temporary Expenses (Click to Remove / Pay Off)</h4></div>", unsafe_allow_html=True)
         for idx, item in enumerate(cloud_data["temporary_expenses"]):
+            yaml_clean_name = item['name'] # Keeps original sheet value without styling string contamination
             c_left, c_right = st.columns([4, 1])
             with c_left: st.markdown(f"🚨 **Week {item['week_target']+1}** | {item['name']}: **${item['val']:,.2f}**")
             with c_right:
-                if st.button("✅ Remove / Paid Off", key=f"del_temp_{item['name']}_{idx}"):
-                    requests.post(APPS_SCRIPT_URL, json={"action": "delete", "sheetName": "temporary_expenses", "targetName": item['name']})
+                if st.button("✅ Remove / Paid Off", key=f"del_temp_{yaml_clean_name}_{idx}"):
+                    requests.post(APPS_SCRIPT_URL, json={"action": "delete", "sheetName": "temporary_expenses", "targetName": yaml_clean_name})
                     st.rerun()
 
 with tab_add_expense:
