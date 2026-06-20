@@ -28,7 +28,6 @@ st.markdown("""
     }
     h1, h2, h3, h4 { color: #f0f6fc !important; font-weight: 700; font-family: -apple-system, sans-serif; }
     
-    /* Dynamic Paycheck Box Styling */
     .paycheck-window-card {
         background-color: #161b22;
         border: 1px solid #30363d;
@@ -36,26 +35,6 @@ st.markdown("""
         padding: 16px;
         border-radius: 8px;
         margin-bottom: 5px;
-    }
-    
-    .bill-alert-row {
-        background-color: #21262d;
-        padding: 6px 12px;
-        margin-top: 4px;
-        border-radius: 4px;
-        border-left: 3px solid #ff7b72;
-        display: flex;
-        justify-content: space-between;
-    }
-    
-    .temp-bill-row {
-        background-color: #281c1c;
-        padding: 6px 12px;
-        margin-top: 4px;
-        border-radius: 4px;
-        border-left: 3px solid #f25c5c;
-        display: flex;
-        justify-content: space-between;
     }
     
     .slice-container {
@@ -106,6 +85,23 @@ def get_due_date_details(day_str, target_month_offset=0):
     except:
         return datetime.date.today()
 
+# --- CALENDAR FIXED-BLOCK ENGINE CALCULATOR ---
+# Anchor to a historical Tuesday/Wednesday split date to establish our 4-week solid blocks
+CYCLE_ANCHOR = datetime.date(2026, 6, 10) # June 10th starts a distinct block week 1
+today = datetime.date.today()
+
+# Calculate exactly how many weeks have passed since our global anchor
+weeks_since_anchor = int((today - CYCLE_ANCHOR).days / 7)
+# Group weeks completely into chunks of 4-week blocks
+current_block_cycle_num = weeks_since_anchor // 4
+block_start_wednesday = CYCLE_ANCHOR + datetime.timedelta(weeks=current_block_cycle_num * 4)
+
+windows = []
+for i in range(4):
+    start_w = block_start_wednesday + datetime.timedelta(weeks=i)
+    end_t = start_w + datetime.timedelta(days=6)
+    windows.append((start_w, end_t))
+
 # --- GOOGLE SHEET LIVE PARSING DATA ENGINE ---
 def get_csv_download_url(sheet_url, sheet_name):
     try:
@@ -123,13 +119,10 @@ def load_cloud_data():
     paid_slices = set()
     deleted_baseline = set()
     
-    saved_weekly_pay = {0: 1200.0, 1: 1200.0, 2: 1200.0, 3: 1200.0}
+    # Initialize income registry using exact date string keys
+    saved_weekly_pay = {windows[i][0].strftime("%Y-%m-%d"): 1200.0 for i in range(4)}
     
-    today = datetime.date.today()
-    days_since_wednesday = (today.weekday() - 2) % 7
-    current_wednesday = today - datetime.timedelta(days=days_since_wednesday)
-    
-    # Fetch 4-Week Saved Income Matrix
+    # Fetch Date-Linked Income Memory
     try:
         url_inc = get_csv_download_url(GOOGLE_SHEET_URL, "weekly_income_memory")
         if url_inc:
@@ -138,10 +131,9 @@ def load_cloud_data():
             if len(df_inc) > 0:
                 for _, row in df_inc.iterrows():
                     try:
-                        wk_idx = int(row.iloc[0])
+                        date_key = str(row.iloc[0]).strip()
                         wk_val = float(str(row.iloc[1]).replace('$', '').replace(',', '').strip())
-                        if wk_idx in saved_weekly_pay:
-                            saved_weekly_pay[wk_idx] = wk_val
+                        saved_weekly_pay[date_key] = wk_val
                     except: pass
     except: pass
 
@@ -155,7 +147,7 @@ def load_cloud_data():
                 for _, row in df_temp.iterrows():
                     try:
                         temporary_expenses.append({
-                            "week_target": int(row.iloc[0]),
+                            "date_target": str(row.iloc[0]).strip(),
                             "name": str(row.iloc[1]).strip(),
                             "val": float(str(row.iloc[2]).replace('$', '').replace(',', '').strip())
                         })
@@ -172,9 +164,7 @@ def load_cloud_data():
                 for _, row in df_ps.iterrows():
                     try:
                         slice_name = str(row.iloc[0]).strip()
-                        date_logged = datetime.datetime.strptime(str(row.iloc[1]).strip(), "%Y-%m-%d").date()
-                        if date_logged >= current_wednesday:
-                            paid_slices.add(slice_name)
+                        paid_slices.add(slice_name)
                     except: pass
     except: pass
 
@@ -274,7 +264,6 @@ RAW_WEEKLY = [
     {"name": "Isuzu mux", "val": 714.00, "freq": "Fortnightly"}, {"name": "TAX", "val": 65.00, "freq": "Fortnightly"}
 ]
 
-# 🎯 YOUR ACTUAL BILL SINKING FUNDS SCHEDULE
 RAW_LONG_TERM = [
     {"name": "Water Bill", "val": 100.00, "freq": "Quarterly", "day": "27 June"},
     {"name": "Electricity Bill", "val": 550.00, "freq": "Quarterly", "day": "27 June"},
@@ -282,7 +271,7 @@ RAW_LONG_TERM = [
     {"name": "Car Rego", "val": 335.00, "freq": "6-Month", "day": "Bi-Annual"},
     {"name": "Costco Membership", "val": 60.00, "freq": "Yearly", "day": "30 April"},
     {"name": "PlayStation Plus", "val": 215.00, "freq": "Yearly", "day": "18 August"},
-    {"name": "McCafe Annual Fund", "val": 150.00, "freq": "Yearly", "day": "16 October"}
+    {"name": "McCave Annual Fund", "val": 150.00, "freq": "Yearly", "day": "16 October"}
 ]
 
 BASE_MONTHLY = [b for b in RAW_MONTHLY if b["name"] not in cloud_data["deleted_baseline"]]
@@ -299,7 +288,6 @@ for item in cloud_data["custom_expenses"]:
     elif item["freq"] == "Monthly": st.session_state.monthly_bills.append(item)
     elif item["freq"] in ["Quarterly", "6-Month", "Yearly"]: st.session_state.long_term_bills.append(item)
 
-# Sinking Fund Reference Totals Math (Exact Multi-Month Slices)
 sum_fixed_monthly = sum((b["val"] * 12) / 52 for b in st.session_state.monthly_bills)
 sum_fixed_weekly = sum(b["val"] if b["freq"] == "Weekly" else b["val"] / 2 for b in st.session_state.weekly_bills)
 
@@ -312,52 +300,33 @@ for b in st.session_state.long_term_bills:
 total_weekly_sum = sum_fixed_monthly + sum_fixed_weekly + sum_long_term + sum(p["Fortnightly Cost"] / 2 for p in st.session_state.afterpay_ledger)
 
 st.title("🛡️ 4-Week Paycheck Horizon Matrix")
-st.caption("Change individual paycheck boxes below dynamically based on your exact hours or scheduled income for that specific week.")
-
-# --- CALENDAR WINDOW MATRIX CALCULATOR ---
-today = datetime.date.today()
-days_since_wed = (today.weekday() - 2) % 7
-wed0 = today - datetime.timedelta(days=days_since_wed)
-
-windows = []
-for i in range(4):
-    start_w = wed0 + datetime.timedelta(weeks=i)
-    end_t = start_w + datetime.timedelta(days=6)
-    windows.append((start_w, end_t))
+st.caption(f"Displaying a structural 4-week static cycle. Current Block Reference: #{current_block_cycle_num}")
 
 window_bills = [[], [], [], []]
 
-# 1. Map Long-Term Sinking Fund Slices to EVERY single week row
+# 1. Map Long-Term Sinking Funds
 for idx in range(4):
     for b in st.session_state.long_term_bills:
-        if b["freq"] == "Quarterly":
-            w_val = (b["val"] * 4) / 52
-        elif b["freq"] == "6-Month":
-            w_val = (b["val"] * 2) / 52
-        else:
-            w_val = b["val"] / 52
+        w_val = (b["val"] * 4) / 52 if b["freq"] == "Quarterly" else ((b["val"] * 2) / 52 if b["freq"] == "6-Month" else b["val"] / 52)
         window_bills[idx].append({"name": f"🏺 SF: {b['name']}", "val": w_val, "is_temp": False, "is_shortfall": False, "is_sf": True})
 
-# 2. Map Monthly Bills to actual target dates
+# 2. Map Monthly Bills
 for b in st.session_state.monthly_bills:
-    for offset in [0, 1]:
+    for offset in [-1, 0, 1]:
         d_date = get_due_date_details(b["day"], target_month_offset=offset)
         for idx, (ws_date, we_date) in enumerate(windows):
             if ws_date <= d_date <= we_date:
                 window_bills[idx].append({"name": b["name"], "val": b["val"], "is_temp": False, "is_shortfall": False, "is_sf": False})
 
-# 3. Map Weekly/Fortnightly Obligations (With Accurate Calendar-Linked Alignment)
+# 3. Map Fortnightly Alignment (Anchored cleanly to June 17th)
 FORTNIGHT_ANCHOR_DATE = datetime.date(2026, 6, 17)
-
 for idx, (ws_date, we_date) in enumerate(windows):
     for b in st.session_state.weekly_bills:
         if b["freq"] == "Weekly":
             window_bills[idx].append({"name": b["name"], "val": b["val"], "is_temp": False, "is_shortfall": False, "is_sf": False})
         else:
             weeks_away = int((ws_date - FORTNIGHT_ANCHOR_DATE).days / 7)
-            is_matching_fortnight = (weeks_away % 2 == 0)
-            
-            if is_matching_fortnight:
+            if weeks_away % 2 == 0:
                 window_bills[idx].append({"name": b["name"], "val": b["val"], "is_temp": False, "is_shortfall": False, "is_sf": False})
 
 # 4. Map Afterpay Ledger
@@ -365,20 +334,22 @@ for plan in st.session_state.afterpay_ledger:
     window_bills[0].append({"name": f"🛍️ AP: {plan['Merchant']}", "val": plan["Fortnightly Cost"], "is_temp": False, "is_shortfall": False, "is_sf": False})
     window_bills[2].append({"name": f"🛍️ AP: {plan['Merchant']}", "val": plan["Fortnightly Cost"], "is_temp": False, "is_shortfall": False, "is_sf": False})
 
-# 5. Inject Custom One-Off Specific Weekly Temporary Expenses
+# 5. Inject One-Off Temp Expenses linked explicitly via their raw Date Key
 for t_exp in cloud_data["temporary_expenses"]:
-    target_idx = t_exp["week_target"]
-    if 0 <= target_idx < 4:
-        window_bills[target_idx].append({"name": f"⚠️ {t_exp['name']}", "val": t_exp["val"], "is_temp": True, "is_shortfall": False, "is_sf": False})
+    for idx, (ws_date, we_date) in enumerate(windows):
+        if t_exp["date_target"] == ws_date.strftime("%Y-%m-%d"):
+            window_bills[idx].append({"name": f"⚠️ {t_exp['name']}", "val": t_exp["val"], "is_temp": True, "is_shortfall": False, "is_sf": False})
 
-# --- RENDER CLOUD-PERSISTENT INPUT COLUMNS W/ SHORTFALL INTELLIGENCE ---
+# --- RENDER TRACKING MATRIX ENGINE ---
 cols_matrix = st.columns(4)
 running_shortfall = 0.0
 
 for i in range(4):
     ws_date, we_date = windows[i]
-    cloud_val = cloud_data["saved_weekly_pay"].get(i, 1200.0)
+    date_key_str = ws_date.strftime("%Y-%m-%d")
     
+    # Check if this precise calendar date has an income entry, else default
+    cloud_val = cloud_data["saved_weekly_pay"].get(date_key_str, 1200.0)
     base_bills_sum = sum(b["val"] for b in window_bills[i])
     
     if running_shortfall > 0:
@@ -386,10 +357,13 @@ for i in range(4):
         
     full_bills_sum = base_bills_sum + running_shortfall
     
+    # Visually flag if the week has already completely passed in real life
+    status_indicator = "⌛ " if we_date < today else "▶️ "
+    
     with cols_matrix[i]:
         st.markdown(f"""
         <div class="paycheck-window-card">
-            <h4>Week {i+1} Paycheck</h4>
+            <h4>{status_indicator} Week {i+1}</h4>
             <span style="color: #8b949e; font-size: 0.82em;">📅 {ws_date.strftime('%d %b')} - {we_date.strftime('%d %b')}</span>
         </div>
         """, unsafe_allow_html=True)
@@ -399,18 +373,17 @@ for i in range(4):
             min_value=0.0,
             value=float(cloud_val),
             step=50.0,
-            key=f"pay_input_wk_{i}"
+            key=f"pay_input_{date_key_str}"
         )
         
-        if st.button(f"💾 Save Week {i+1} Income", key=f"save_wk_btn_{i}", use_container_width=True):
-            requests.post(APPS_SCRIPT_URL, json={"action": "delete", "sheetName": "weekly_income_memory", "targetName": str(i)})
-            requests.post(APPS_SCRIPT_URL, json={"action": "add", "sheetName": "weekly_income_memory", "rowData": [i, this_weeks_pay]})
-            st.success(f"Week {i+1} Saved!")
+        if st.button("💾 Save Income", key=f"save_btn_{date_key_str}", use_container_width=True):
+            requests.post(APPS_SCRIPT_URL, json={"action": "delete", "sheetName": "weekly_income_memory", "targetName": date_key_str})
+            requests.post(APPS_SCRIPT_URL, json={"action": "add", "sheetName": "weekly_income_memory", "rowData": [date_key_str, this_weeks_pay]})
+            st.success("Income Locked!")
             time.sleep(0.4)
             st.rerun()
         
         net_leftover = this_weeks_pay - full_bills_sum
-        
         st.metric(label="Total Owed Full", value=f"${full_bills_sum:,.2f}")
         if net_leftover >= 0:
             st.success(f"Leftover: ${net_leftover:,.2f}")
@@ -421,14 +394,10 @@ for i in range(4):
             
         st.write("---")
         for item in window_bills[i]:
-            if item.get("is_shortfall"):
-                row_style = "background-color: #3b1818; padding: 6px 12px; margin-top: 4px; border-radius: 4px; border-left: 3px solid #ff4444; display: flex; justify-content: space-between;"
-            elif item.get("is_temp", False):
-                row_style = "background-color: #281c1c; padding: 6px 12px; margin-top: 4px; border-radius: 4px; border-left: 3px solid #f25c5c; display: flex; justify-content: space-between;"
-            elif item.get("is_sf", False):
-                row_style = "background-color: #112419; padding: 6px 12px; margin-top: 4px; border-radius: 4px; border-left: 3px solid #00e676; display: flex; justify-content: space-between;"
-            else:
-                row_style = "background-color: #21262d; padding: 6px 12px; margin-top: 4px; border-radius: 4px; border-left: 3px solid #58a6ff; display: flex; justify-content: space-between;"
+            if item.get("is_shortfall"): row_style = "background-color: #3b1818; padding: 6px 12px; margin-top: 4px; border-radius: 4px; border-left: 3px solid #ff4444; display: flex; justify-content: space-between;"
+            elif item.get("is_temp", False): row_style = "background-color: #281c1c; padding: 6px 12px; margin-top: 4px; border-radius: 4px; border-left: 3px solid #f25c5c; display: flex; justify-content: space-between;"
+            elif item.get("is_sf", False): row_style = "background-color: #112419; padding: 6px 12px; margin-top: 4px; border-radius: 4px; border-left: 3px solid #00e676; display: flex; justify-content: space-between;"
+            else: row_style = "background-color: #21262d; padding: 6px 12px; margin-top: 4px; border-radius: 4px; border-left: 3px solid #58a6ff; display: flex; justify-content: space-between;"
             
             st.markdown(f"""
             <div style="{row_style}">
@@ -541,28 +510,35 @@ with tab_spend_track:
 
 with tab_oneoff_temp:
     st.markdown("### 🚨 Add Temporary One-Off Expense to a Specific Week")
-    st.caption("Perfect for unexpected costs that happen once, allowing you to intercept a specific paycheck row.")
     with st.form("temporary_expense_form", clear_on_submit=True):
-        target_wk_sel = st.selectbox("Target Paycheck Card Location", ["Week 1", "Week 2", "Week 3", "Week 4"])
-        temp_name = st.text_input("Expense Title (e.g. 'Car Mechanic', 'Birthday Gift')")
+        # Let the user pick dynamically from the exact current block windows
+        target_wk_sel = st.selectbox(
+            "Target Paycheck Block Location", 
+            [f"Week {i+1} ({windows[i][0].strftime('%d %b')})" for i in range(4)]
+        )
+        temp_name = st.text_input("Expense Title (e.g. 'Car Mechanic')")
         temp_amt = st.number_input("Amount Owed ($)", min_value=0.0, step=10.0)
         
         if st.form_submit_button("Inject into Target Week Row"):
             if temp_name and temp_amt > 0:
-                wk_mapping = {"Week 1": 0, "Week 2": 1, "Week 3": 2, "Week 4": 3}
-                payload = {"action": "add", "sheetName": "temporary_expenses", "rowData": [wk_mapping[target_wk_sel], temp_name, temp_amt]}
+                wk_idx = int(target_wk_sel.split(" ")[1]) - 1
+                target_date_str = windows[wk_idx][0].strftime("%Y-%m-%d")
+                payload = {"action": "add", "sheetName": "temporary_expenses", "rowData": [target_date_str, temp_name, temp_amt]}
                 requests.post(APPS_SCRIPT_URL, json=payload)
-                st.success(f"Injected into {target_wk_sel}!"); time.sleep(0.5); st.rerun()
+                st.success("Temporary Overload Injected!"); time.sleep(0.5); st.rerun()
 
     if cloud_data["temporary_expenses"]:
-        st.markdown("<div class='category-header'><h4>🗑️ Active Temporary Expenses (Click to Remove / Pay Off)</h4></div>", unsafe_allow_html=True)
+        st.markdown("<div class='category-header'><h4>🗑️ Active Temporary Expenses</h4></div>", unsafe_allow_html=True)
         for idx, item in enumerate(cloud_data["temporary_expenses"]):
-            yaml_clean_name = item['name'] # Keeps original sheet value without styling string contamination
+            # Filter visually to match current visible window range context
+            matching_weeks = [f"Week {i+1}" for i in range(4) if windows[i][0].strftime("%Y-%m-%d") == item['date_target']]
+            display_label = matching_weeks[0] if matching_weeks else "Out of Range"
+            
             c_left, c_right = st.columns([4, 1])
-            with c_left: st.markdown(f"🚨 **Week {item['week_target']+1}** | {item['name']}: **${item['val']:,.2f}**")
+            with c_left: st.markdown(f"🚨 **{display_label}** ({item['date_target']}) | {item['name']}: **${item['val']:,.2f}**")
             with c_right:
-                if st.button("✅ Remove / Paid Off", key=f"del_temp_{yaml_clean_name}_{idx}"):
-                    requests.post(APPS_SCRIPT_URL, json={"action": "delete", "sheetName": "temporary_expenses", "targetName": yaml_clean_name})
+                if st.button("✅ Remove / Paid Off", key=f"del_temp_{item['name']}_{idx}"):
+                    requests.post(APPS_SCRIPT_URL, json={"action": "delete", "sheetName": "temporary_expenses", "targetName": item['name']})
                     st.rerun()
 
 with tab_add_expense:
