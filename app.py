@@ -318,8 +318,8 @@ for b in st.session_state.monthly_bills:
             if ws_date <= d_date <= we_date:
                 window_bills[idx].append({"name": b["name"], "val": b["val"], "is_temp": False, "is_shortfall": False, "is_sf": False})
 
-# 3. Map Fortnightly Alignment (Anchored cleanly to June 17th)
-FORTNIGHT_ANCHOR_DATE = datetime.date(2026, 6, 17)
+# 3. Map Fortnightly Alignment (Anchored to your exact June 24th payment date)
+FORTNIGHT_ANCHOR_DATE = datetime.date(2026, 6, 24) 
 for idx, (ws_date, we_date) in enumerate(windows):
     for b in st.session_state.weekly_bills:
         if b["freq"] == "Weekly":
